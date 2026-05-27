@@ -1,0 +1,15 @@
+spring:
+  application:
+    name: financia-api
+  datasource:
+    url: jdbc:postgresql://localhost:5432/financia
+    username: postgres
+    password: 21062004
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+    show-sql: true
