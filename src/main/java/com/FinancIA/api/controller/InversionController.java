@@ -20,11 +20,7 @@ public class InversionController {
 
     @GetMapping("/activos/tasas")
     public List<Map<String, Object>> obtenerTasasBilleteras() {
-        return List.of(
-            Map.of("entidad", "Mercado Pago", "tna", 35.0, "tipo", "Billetera Virtual"),
-            Map.of("entidad", "Personal Pay", "tna", 37.5, "tipo", "Billetera Virtual"),
-            Map.of("entidad", "Banco Nación", "tna", 39.0, "tipo", "Plazo Fijo Tradicional")
-        );
+        return activoService.getActivos();
     }
 
     @PostMapping("/ia/simular")

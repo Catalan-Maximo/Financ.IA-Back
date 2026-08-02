@@ -41,6 +41,15 @@ public class ActivoService {
     );
 
     /**
+     * Devuelve la lista de activos del mercado.
+     * Fuente única de verdad — el controller delega aquí en vez de duplicar datos.
+     */
+    public List<Map<String, Object>> getActivos() {
+        return ACTIVOS_MERCADO;
+    }
+
+
+    /**
      * Calcula el rendimiento real de todos los activos del mercado
      * contra la inflación informada por el usuario.
      */
