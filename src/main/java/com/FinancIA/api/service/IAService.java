@@ -250,9 +250,11 @@ public class IAService {
     }
 
     private String extraerPalabraClave(String tipoActivo) {
-        if (tipoActivo.toLowerCase().contains("plazo")) return "plazo";
-        if (tipoActivo.toLowerCase().contains("billetera")) return "billetera";
-        return "billetera"; // fallback
+        String lower = tipoActivo.toLowerCase();
+        if (lower.contains("plazo")) return "plazo";
+        if (lower.contains("billetera")) return "billetera";
+        if (lower.contains("dólar") || lower.contains("dolar")) return "dólar";
+        return "billetera"; // fallback para tipos desconocidos
     }
 
     private double redondear(double valor) {
