@@ -23,18 +23,6 @@ public class InversionController {
         return activoService.getActivos();
     }
 
-    @PostMapping("/ia/simular")
-    public Map<String, String> simularInversion(@RequestBody Map<String, String> peticion) {
-        String activoA = peticion.getOrDefault("activoA", "Plazo Fijo");
-        String activoB = peticion.getOrDefault("activoB", "Dólar");
-        
-        String respuestaIA = "Analizando tu perfil... En base a la inflación proyectada, " +
-                "comparar " + activoA + " contra " + activoB + " muestra que a corto plazo " +
-                "te conviene mantener liquidez en pesos remunerados, pero diversificando un 30% a " + activoB + ".";
-                
-        return Map.of("consejoIA", respuestaIA);
-    }
-
     /**
      * POST /api/v1/activos/comparar
      *
