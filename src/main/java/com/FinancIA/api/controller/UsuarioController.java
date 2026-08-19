@@ -2,6 +2,7 @@ package com.FinancIA.api.controller;
 
 import com.FinancIA.api.domain.Usuario;
 import com.FinancIA.api.dto.PerfilRequestDTO;
+import com.FinancIA.api.exception.ResourceNotFoundException;
 import com.FinancIA.api.repository.UsuarioRepository;
 import com.FinancIA.api.service.PerfilInversorService;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -46,6 +47,6 @@ public class UsuarioController {
     @GetMapping("/{id}")
     public Usuario obtenerUsuario(@PathVariable Long id) {
         return usuarioRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
+                .orElseThrow(() -> new ResourceNotFoundException("Usuario no encontrado"));
     }
 }
