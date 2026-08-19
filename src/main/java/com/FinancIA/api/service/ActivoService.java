@@ -1,16 +1,24 @@
 package com.FinancIA.api.service;
 
+import com.FinancIA.api.domain.TasaMercado;
 import com.FinancIA.api.dto.ComparacionRequest;
 import com.FinancIA.api.dto.ComparacionResponse;
 import com.FinancIA.api.dto.RendimientoDTO;
+import com.FinancIA.api.repository.TasaMercadoRepository;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
  * Servicio de cálculo financiero para activos de inversión.
+ *
+ * Los datos de mercado se leen de la base de datos, poblada por el
+ * {@link MercadoDataJob} con valores reales del BCRA.
  *
  * Fórmulas utilizadas:
  * ─────────────────────────────────────────────────────────
@@ -30,42 +38,45 @@ import java.util.Map;
 @Service
 public class ActivoService {
 
-    /**
-     * Datos simulados de tasas del mercado.
-     * En una iteración futura se podrían traer de una API externa o BD.
-     */
-    private static final List<Map<String, Object>> ACTIVOS_MERCADO = List.of(
-        Map.of("entidad", "Mercado Pago",  "tna", 35.0, "tipo", "Billetera Virtual"),
-        Map.of("entidad", "Personal Pay",  "tna", 37.5, "tipo", "Billetera Virtual"),
-        Map.of("entidad", "Banco Nación",  "tna", 39.0, "tipo", "Plazo Fijo Tradicional")
-    );
+    /** Tipo de activo para la tasa BADLAR (plazos fijos de bancos privados). */
+    public static final String PLAZO_FIJO = "Plazo Fijo Tradicional";
 
-    /**
-     * Devuelve la lista de activos del mercado.
-     * Fuente única de verdad — el controller delega aquí en vez de duplicar datos.
-     */
-    public List<Map<String, Object>> getActivos() {
-        return ACTIVOS_MERCADO;
+    /** Tipo de activo para el tipo de cambio minorista del BCRA. */
+    public static final String DOLAR = "Dólar Oficial";
+
+    /** Tipo de activo para las tasas de billeteras virtuales (scrapeadas). */
+    public static final String BILLETERA = "Billetera Virtual";
+
+    private final TasaMercadoRepository tasaRepository;
+
+    public ActivoService(TasaMercadoRepository tasaRepository) {
+        this.tasaRepository = tasaRepository;
     }
 
+    /**
+     * Devuelve los activos del mercado con datos reales persistidos en BD.
+     */
+    public List<Map<String, Object>> getActivos() {
+        return construirActivosDesdeBD();
+    }
 
     /**
      * Calcula el rendimiento real de todos los activos del mercado
      * contra la inflación informada por el usuario.
      */
     public ComparacionResponse compararActivos(ComparacionRequest request) {
-        double monto           = request.getMonto();
-        int    plazoMeses      = request.getPlazoMeses();
+        double monto            = request.getMonto();
+        int    plazoMeses       = request.getPlazoMeses();
         double inflacionMensual = request.getInflacionMensual();
 
-        List<RendimientoDTO> rendimientos = ACTIVOS_MERCADO.stream()
+        List<RendimientoDTO> rendimientos = construirActivosDesdeBD().stream()
                 .map(activo -> calcularRendimiento(activo, monto, plazoMeses, inflacionMensual))
                 .toList();
 
         // Determinamos cuál activo tiene la mejor tasa real mensual
         String mejorOpcion = rendimientos.stream()
                 .max(Comparator.comparingDouble(RendimientoDTO::getTasaRealMensual))
-                .map(RendimientoDTO::getEntidad)
+                .map(RendimientoDTO::getTipo)
                 .orElse("N/A");
 
         return ComparacionResponse.builder()
@@ -76,6 +87,56 @@ public class ActivoService {
                 .mejorOpcion(mejorOpcion)
                 .build();
     }
+
+    // ─── Construcción de activos desde la BD ───────────────────
+
+    private List<Map<String, Object>> construirActivosDesdeBD() {
+        List<Map<String, Object>> activos = new ArrayList<>();
+
+        // Plazo fijo: última tasa BADLAR publicada por el BCRA
+        tasaRepository.findTop1ByTipoActivoOrderByFechaDesc(PLAZO_FIJO).ifPresent(tasa ->
+                activos.add(Map.of("entidad", "BCRA", "tna", tasa.getValor(), "tipo", PLAZO_FIJO)));
+
+        // Dólar oficial: variación de los últimos 30 días anualizada.
+        // Necesita al menos 2 registros (hoy + uno anterior) para poder
+        // calcular una variación; los primeros días de datos el dólar
+        // no aparece hasta que el job acumula historial.
+        tasaRepository.findTop1ByTipoActivoOrderByFechaDesc(DOLAR).ifPresent(ultima -> {
+            LocalDate desde = ultima.getFecha().minusDays(30);
+            List<TasaMercado> historial =
+                    tasaRepository.findByTipoActivoAndFechaGreaterThanEqualOrderByFechaAsc(DOLAR, desde);
+            boolean hayHistorialReal = historial.size() > 1
+                    && historial.get(0).getFecha().isBefore(ultima.getFecha())
+                    && historial.get(0).getValor() > 0;
+            if (hayHistorialReal) {
+                double variacion30d = ultima.getValor() / historial.get(0).getValor() - 1;
+                double tnaAnualizada = (Math.pow(1 + variacion30d, 12) - 1) * 100;
+                activos.add(Map.of("entidad", "BCRA", "tna", redondear(tnaAnualizada), "tipo", DOLAR));
+            }
+        });
+
+        // Billeteras virtuales: última tasa de cada entidad (scrape diario).
+        // El stream viene ordenado por fecha desc — nos quedamos con la
+        // primera aparición de cada entidad (la más reciente).
+        Map<String, TasaMercado> ultimaPorEntidad = new LinkedHashMap<>();
+        for (TasaMercado tasa : tasaRepository.findByTipoActivoOrderByFechaDesc(BILLETERA)) {
+            if (BilleterasClient.EXCLUIDAS.contains(tasa.getEntidad())) continue;
+            ultimaPorEntidad.putIfAbsent(tasa.getEntidad(), tasa);
+        }
+        for (TasaMercado tasa : ultimaPorEntidad.values()) {
+            activos.add(Map.of("entidad", tasa.getEntidad(), "tna", tasa.getValor(), "tipo", BILLETERA));
+        }
+
+        // Ordenamos de mayor a menor tasa para que el dashboard muestre
+        // primero las opciones más rendidoras.
+        activos.sort((a, b) -> Double.compare(
+                ((Number) b.get("tna")).doubleValue(),
+                ((Number) a.get("tna")).doubleValue()));
+
+        return activos;
+    }
+
+    // ─── Cálculo por activo ────────────────────────────────────
 
     /**
      * Calcula las métricas de rendimiento para un activo individual.

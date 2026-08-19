@@ -10,3 +10,11 @@ spring:
     hibernate:
       ddl-auto: update
     show-sql: true
+
+# IA de Groq — la API key va por variable de entorno GROQ_API_KEY.
+# Si no está configurada, el asesor usa la lógica rule-based como fallback.
+groq:
+  api:
+    base-url: https://api.groq.com/openai/v1
+    key: ${GROQ_API_KEY:}
+    model: openai/gpt-oss-120b

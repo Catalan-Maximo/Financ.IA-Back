@@ -1,9 +1,9 @@
 package com.FinancIA.api.service;
 
 import com.FinancIA.api.dto.*;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
@@ -11,36 +11,48 @@ import java.util.List;
  * Servicio de "IA" que genera recomendaciones personalizadas de inversión
  * según el perfil de riesgo del usuario.
  *
- * Lógica basada en reglas (rule-based) — simula el comportamiento de una IA
- * combinando los cálculos financieros del ActivoService con estrategias
- * predefinidas por perfil de riesgo.
+ * La redacción del consejo se delega al LLM de Groq cuando hay API key
+ * configurada (ver {@link GroqClient}); los cálculos financieros SIEMPRE
+ * se hacen en Java y se le pasan al modelo como contexto. Si Groq no está
+ * disponible, se usa la lógica rule-based como fallback.
  *
  * Perfiles soportados:
  * ─────────────────────────────────────────────────────────
- *  Conservador → Prioriza capital garantizado. 70% Plazo Fijo, 20% Billetera, 10% Dólar.
- *  Moderado    → Balancea rendimiento y seguridad. 40% Plazo Fijo, 40% Billetera, 20% Dólar.
- *  Agresivo    → Maximiza rendimiento. 20% Plazo Fijo, 50% Billetera, 30% Dólar.
+ *  Conservador → Prioriza capital garantizado. 80% Plazo Fijo, 20% Dólar.
+ *  Moderado    → Balancea rendimiento y cobertura. 60% Plazo Fijo, 40% Dólar.
+ *  Agresivo    → Maximiza rendimiento asumiendo riesgo cambiario. 40% Plazo Fijo, 60% Dólar.
  * ─────────────────────────────────────────────────────────
  */
 @Service
+@Slf4j
 public class IAService {
 
-    private final ActivoService activoService;
+    private static final String SYSTEM_PROMPT = """
+            Sos el asesor virtual de FinancIA, una app argentina de finanzas personales.
+            Redactá recomendaciones de inversión claras y concretas en español rioplatense,
+            dirigidas a un usuario no experto. Usá 2 párrafos cortos y una lista breve
+            para la distribución sugerida. NO inventes datos: usá únicamente los números
+            que te pasamos. No uses markdown complejo ni emojis excesivos.
+            """;
 
-    public IAService(ActivoService activoService) {
+    private final ActivoService activoService;
+    private final GroqClient groqClient;
+
+    public IAService(ActivoService activoService, GroqClient groqClient) {
         this.activoService = activoService;
+        this.groqClient = groqClient;
     }
 
     /**
      * Genera una recomendación de inversión personalizada.
      */
     public IAResponseDTO generarRecomendacion(IARequestDTO request) {
-        String perfil          = normalizarPerfil(request.getPerfilInversor());
-        double monto           = request.getMonto();
-        int    plazoMeses      = request.getPlazoMeses();
+        String perfil           = normalizarPerfil(request.getPerfilInversor());
+        double monto            = request.getMonto();
+        int    plazoMeses       = request.getPlazoMeses();
         double inflacionMensual = request.getInflacionMensual();
 
-        // 1. Calcular rendimientos reales usando ActivoService
+        // 1. Calcular rendimientos reales usando ActivoService (datos del BCRA)
         ComparacionRequest compReq = new ComparacionRequest();
         compReq.setMonto(monto);
         compReq.setPlazoMeses(plazoMeses);
@@ -53,15 +65,15 @@ public class IAService {
         List<IAResponseDTO.AsignacionDTO> distribucion = generarDistribucion(perfil);
 
         // 3. Calcular ganancia real estimada ponderada del portafolio
-        double gananciaRealEstimada = calcularGananciaPonderada(rendimientos, distribucion, monto);
+        double gananciaRealEstimada = calcularGananciaPonderada(rendimientos, distribucion);
 
-        // 4. Generar texto de recomendación
-        String recomendacion = generarTextoRecomendacion(
+        // 4. Texto de recomendación: Groq si está disponible, si no rule-based
+        String recomendacion = generarRecomendacionConFallback(
                 perfil, rendimientos, distribucion, monto, plazoMeses, inflacionMensual,
                 request.getActivoA(), request.getActivoB()
         );
 
-        // 5. Resumen de estrategia
+        // 5. Resumen de estrategia (rule-based, corto y estable)
         String resumen = generarResumen(perfil, comparacion.getMejorOpcion(), inflacionMensual);
 
         return IAResponseDTO.builder()
@@ -75,6 +87,72 @@ public class IAService {
                 .build();
     }
 
+    // ─── Recomendación: Groq con fallback ──────────────────────
+
+    private String generarRecomendacionConFallback(
+            String perfil,
+            List<RendimientoDTO> rendimientos,
+            List<IAResponseDTO.AsignacionDTO> distribucion,
+            double monto,
+            int plazoMeses,
+            double inflacionMensual,
+            String activoA,
+            String activoB
+    ) {
+        String fallback = generarTextoRecomendacion(
+                perfil, rendimientos, distribucion, monto, plazoMeses, inflacionMensual,
+                activoA, activoB
+        );
+
+        if (!groqClient.estaConfigurado()) {
+            log.info("GROQ_API_KEY no configurada — usando recomendación rule-based");
+            return fallback;
+        }
+
+        try {
+            String textoGroq = groqClient.generarRecomendacion(
+                    SYSTEM_PROMPT,
+                    construirPromptUsuario(perfil, rendimientos, distribucion, monto, plazoMeses, inflacionMensual)
+            );
+            if (textoGroq != null && !textoGroq.isBlank()) {
+                return textoGroq.trim();
+            }
+        } catch (Exception e) {
+            // La app no debe romperse si Groq no responde
+            log.warn("Groq no respondió, usando recomendación rule-based: {}", e.getMessage());
+        }
+        return fallback;
+    }
+
+    /** Arma el prompt con los datos calculados para que el LLM solo redacte. */
+    private String construirPromptUsuario(
+            String perfil,
+            List<RendimientoDTO> rendimientos,
+            List<IAResponseDTO.AsignacionDTO> distribucion,
+            double monto,
+            int plazoMeses,
+            double inflacionMensual
+    ) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(String.format("Perfil de riesgo: %s.%n", perfil));
+        sb.append(String.format("Monto a invertir: $%,.0f.%n", monto));
+        sb.append(String.format("Plazo: %d meses.%n", plazoMeses));
+        sb.append(String.format("Inflación mensual estimada: %.1f%%.%n", inflacionMensual));
+        sb.append(String.format("%nRendimientos calculados con datos reales del BCRA:%n"));
+        for (RendimientoDTO r : rendimientos) {
+            sb.append(String.format(
+                    "- %s (%s): TNA %.2f%%, tasa real mensual %+.2f%%, ganancia real estimada $%,.0f%n",
+                    r.getEntidad(), r.getTipo(), r.getTna(), r.getTasaRealMensual(), r.getGananciaReal()
+            ));
+        }
+        sb.append(String.format("%nDistribución sugerida por reglas:%n"));
+        for (IAResponseDTO.AsignacionDTO a : distribucion) {
+            sb.append(String.format("- %d%% %s: %s%n", a.getPorcentaje(), a.getTipoActivo(), a.getMotivo()));
+        }
+        sb.append(String.format("%nEscribí la recomendación para este usuario.%n"));
+        return sb.toString();
+    }
+
     // ─── Distribución por perfil ────────────────────────────────
 
     private List<IAResponseDTO.AsignacionDTO> generarDistribucion(String perfil) {
@@ -82,52 +160,37 @@ public class IAService {
             case "Conservador" -> List.of(
                 IAResponseDTO.AsignacionDTO.builder()
                     .tipoActivo("Plazo Fijo Tradicional")
-                    .porcentaje(70)
+                    .porcentaje(80)
                     .motivo("Capital garantizado con tasa regulada por BCRA")
                     .build(),
                 IAResponseDTO.AsignacionDTO.builder()
-                    .tipoActivo("Billetera Virtual")
-                    .porcentaje(20)
-                    .motivo("Liquidez inmediata para imprevistos")
-                    .build(),
-                IAResponseDTO.AsignacionDTO.builder()
                     .tipoActivo("Dólar / Cobertura")
-                    .porcentaje(10)
+                    .porcentaje(20)
                     .motivo("Cobertura mínima ante devaluación")
                     .build()
             );
             case "Agresivo" -> List.of(
                 IAResponseDTO.AsignacionDTO.builder()
-                    .tipoActivo("Billetera Virtual")
-                    .porcentaje(50)
-                    .motivo("Máxima liquidez con rendimiento diario competitivo")
-                    .build(),
-                IAResponseDTO.AsignacionDTO.builder()
                     .tipoActivo("Dólar / Cobertura")
-                    .porcentaje(30)
-                    .motivo("Diversificación agresiva ante volatilidad cambiaria")
+                    .porcentaje(60)
+                    .motivo("Mayor exposición cambiaria buscando ganancia por devaluación")
                     .build(),
                 IAResponseDTO.AsignacionDTO.builder()
                     .tipoActivo("Plazo Fijo Tradicional")
-                    .porcentaje(20)
-                    .motivo("Base de rendimiento garantizado")
+                    .porcentaje(40)
+                    .motivo("Piso de rendimiento garantizado")
                     .build()
             );
             default -> List.of( // Moderado
                 IAResponseDTO.AsignacionDTO.builder()
                     .tipoActivo("Plazo Fijo Tradicional")
-                    .porcentaje(40)
-                    .motivo("Rendimiento estable con capital garantizado")
-                    .build(),
-                IAResponseDTO.AsignacionDTO.builder()
-                    .tipoActivo("Billetera Virtual")
-                    .porcentaje(40)
-                    .motivo("Liquidez diaria con rendimiento competitivo")
+                    .porcentaje(60)
+                    .motivo("Base de rendimiento estable con capital garantizado")
                     .build(),
                 IAResponseDTO.AsignacionDTO.builder()
                     .tipoActivo("Dólar / Cobertura")
-                    .porcentaje(20)
-                    .motivo("Cobertura moderada ante escenarios de devaluación")
+                    .porcentaje(40)
+                    .motivo("Cobertura moderada ante escenarios cambiarios")
                     .build()
             );
         };
@@ -137,8 +200,7 @@ public class IAService {
 
     private double calcularGananciaPonderada(
             List<RendimientoDTO> rendimientos,
-            List<IAResponseDTO.AsignacionDTO> distribucion,
-            double montoTotal
+            List<IAResponseDTO.AsignacionDTO> distribucion
     ) {
         double gananciaTotal = 0;
 
@@ -162,7 +224,7 @@ public class IAService {
         return gananciaTotal;
     }
 
-    // ─── Texto de recomendación ─────────────────────────────────
+    // ─── Texto de recomendación rule-based (fallback) ───────────
 
     private String generarTextoRecomendacion(
             String perfil,
@@ -188,7 +250,9 @@ public class IAService {
 
         // Análisis de activos
         long activosQueGanan = rendimientos.stream().filter(RendimientoDTO::isLeGanaALaInflacion).count();
-        if (activosQueGanan == rendimientos.size()) {
+        if (rendimientos.isEmpty()) {
+            sb.append("todavía no hay datos de mercado cargados. ");
+        } else if (activosQueGanan == rendimientos.size()) {
             sb.append("todos los activos analizados le ganan a la inflación, lo cual es positivo. ");
         } else if (activosQueGanan > 0) {
             sb.append(String.format("solo %d de %d activos le ganan a la inflación. ", activosQueGanan, rendimientos.size()));
@@ -249,12 +313,13 @@ public class IAService {
         };
     }
 
+    /** Palabra clave del tipo de activo para matchear contra los rendimientos. */
     private String extraerPalabraClave(String tipoActivo) {
         String lower = tipoActivo.toLowerCase();
         if (lower.contains("plazo")) return "plazo";
         if (lower.contains("billetera")) return "billetera";
         if (lower.contains("dólar") || lower.contains("dolar")) return "dólar";
-        return "billetera"; // fallback para tipos desconocidos
+        return "plazo"; // fallback conservador
     }
 
     private double redondear(double valor) {
