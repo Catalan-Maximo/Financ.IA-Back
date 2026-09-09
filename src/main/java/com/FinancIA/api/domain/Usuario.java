@@ -18,6 +18,9 @@ public class Usuario {
     /** Contraseña hasheada con BCrypt (null en usuarios creados antes del auth). */
     private String password;
 
+    /** Token de push de Expo (null si el usuario no habilitó notificaciones). */
+    private String pushToken;
+
     /** Suma total de puntos del test (8 a 49). */
     private Integer puntaje;
 

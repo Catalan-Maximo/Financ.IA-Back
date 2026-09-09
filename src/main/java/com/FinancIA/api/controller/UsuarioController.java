@@ -6,6 +6,8 @@ import com.FinancIA.api.exception.ResourceNotFoundException;
 import com.FinancIA.api.repository.UsuarioRepository;
 import com.FinancIA.api.service.PerfilInversorService;
 import org.springframework.security.core.context.SecurityContextHolder;
+
+import java.util.Map;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -54,5 +56,26 @@ public class UsuarioController {
     public Usuario obtenerUsuario(@PathVariable Long id) {
         return usuarioRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Usuario no encontrado"));
+    }
+
+    /**
+     * POST /api/v1/usuarios/push-token
+     *
+     * Guarda el Expo push token del dispositivo en el usuario autenticado,
+     * para recibir señales cripto cuando el backend detecta cambios.
+     *
+     * Ejemplo de body: { "token": "ExponentPushToken[xxxxxxxx]" }
+     */
+    @PostMapping("/push-token")
+    public Map<String, String> guardarPushToken(@RequestBody Map<String, String> request) {
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+        String email = authentication != null ? authentication.getName() : null;
+
+        Usuario usuario = usuarioRepository.findByEmailIgnoreCase(email)
+                .orElseThrow(() -> new ResourceNotFoundException("Usuario autenticado no encontrado"));
+
+        usuario.setPushToken(request.get("token"));
+        usuarioRepository.save(usuario);
+        return Map.of("estado", "ok");
     }
 }

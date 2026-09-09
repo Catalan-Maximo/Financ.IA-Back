@@ -1,11 +1,14 @@
 package com.FinancIA.api.service;
 
+import com.FinancIA.api.domain.CriptoEstado;
 import com.FinancIA.api.dto.*;
+import com.FinancIA.api.repository.CriptoEstadoRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Servicio de "IA" que genera recomendaciones personalizadas de inversión
@@ -33,14 +36,21 @@ public class IAService {
             dirigidas a un usuario no experto. Usá 2 párrafos cortos y una lista breve
             para la distribución sugerida. NO inventes datos: usá únicamente los números
             que te pasamos. No uses markdown complejo ni emojis excesivos.
+            Reglas para cripto según el perfil de riesgo del usuario:
+            - Conservador: NO recomendar cripto; mencionarla solo como advertencia de volatilidad.
+            - Moderado: cripto solo como cobertura con porcentaje chico, y solo si el veredicto no es AVOID.
+            - Agresivo: entrada permitida si el veredicto es BUY o WATCH.
             """;
 
     private final ActivoService activoService;
     private final GroqClient groqClient;
+    private final CriptoEstadoRepository criptoRepository;
 
-    public IAService(ActivoService activoService, GroqClient groqClient) {
+    public IAService(ActivoService activoService, GroqClient groqClient,
+                     CriptoEstadoRepository criptoRepository) {
         this.activoService = activoService;
         this.groqClient = groqClient;
+        this.criptoRepository = criptoRepository;
     }
 
     /**
@@ -67,9 +77,15 @@ public class IAService {
         // 3. Calcular ganancia real estimada ponderada del portafolio
         double gananciaRealEstimada = calcularGananciaPonderada(rendimientos, distribucion);
 
+        // 3b. Estado cripto (últimos snapshots del job de Binance)
+        List<CriptoEstado> cripto = BinanceClient.PARES.stream()
+                .map(par -> criptoRepository.findTop1BySimboloOrderByFechaDesc(par))
+                .flatMap(Optional::stream)
+                .toList();
+
         // 4. Texto de recomendación: Groq si está disponible, si no rule-based
         String recomendacion = generarRecomendacionConFallback(
-                perfil, rendimientos, distribucion, monto, plazoMeses, inflacionMensual,
+                perfil, rendimientos, distribucion, cripto, monto, plazoMeses, inflacionMensual,
                 request.getActivoA(), request.getActivoB()
         );
 
@@ -93,6 +109,7 @@ public class IAService {
             String perfil,
             List<RendimientoDTO> rendimientos,
             List<IAResponseDTO.AsignacionDTO> distribucion,
+            List<CriptoEstado> cripto,
             double monto,
             int plazoMeses,
             double inflacionMensual,
@@ -100,7 +117,7 @@ public class IAService {
             String activoB
     ) {
         String fallback = generarTextoRecomendacion(
-                perfil, rendimientos, distribucion, monto, plazoMeses, inflacionMensual,
+                perfil, rendimientos, distribucion, cripto, monto, plazoMeses, inflacionMensual,
                 activoA, activoB
         );
 
@@ -112,7 +129,7 @@ public class IAService {
         try {
             String textoGroq = groqClient.generarRecomendacion(
                     SYSTEM_PROMPT,
-                    construirPromptUsuario(perfil, rendimientos, distribucion, monto, plazoMeses, inflacionMensual)
+                    construirPromptUsuario(perfil, rendimientos, distribucion, cripto, monto, plazoMeses, inflacionMensual)
             );
             if (textoGroq != null && !textoGroq.isBlank()) {
                 return textoGroq.trim();
@@ -129,6 +146,7 @@ public class IAService {
             String perfil,
             List<RendimientoDTO> rendimientos,
             List<IAResponseDTO.AsignacionDTO> distribucion,
+            List<CriptoEstado> cripto,
             double monto,
             int plazoMeses,
             double inflacionMensual
@@ -148,6 +166,18 @@ public class IAService {
         sb.append(String.format("%nDistribución sugerida por reglas:%n"));
         for (IAResponseDTO.AsignacionDTO a : distribucion) {
             sb.append(String.format("- %d%% %s: %s%n", a.getPorcentaje(), a.getTipoActivo(), a.getMotivo()));
+        }
+        sb.append(String.format("%nEstado cripto (análisis técnico, Binance):%n"));
+        if (cripto.isEmpty()) {
+            sb.append("- Sin datos cripto disponibles hoy.%n");
+        } else {
+            for (CriptoEstado c : cripto) {
+                String rsi = c.getRsi14() == null ? "n/d" : String.format("%.1f", c.getRsi14());
+                sb.append(String.format(
+                        "- %s: precio $%,.0f, RSI %s, veredicto %s (%d/4 checks)%n",
+                        c.getSimbolo(), c.getPrecio(), rsi, c.getVeredicto(), c.getChecksPasados()
+                ));
+            }
         }
         sb.append(String.format("%nEscribí la recomendación para este usuario.%n"));
         return sb.toString();
@@ -230,6 +260,7 @@ public class IAService {
             String perfil,
             List<RendimientoDTO> rendimientos,
             List<IAResponseDTO.AsignacionDTO> distribucion,
+            List<CriptoEstado> cripto,
             double monto,
             int plazoMeses,
             double inflacionMensual,
@@ -271,6 +302,18 @@ public class IAService {
         for (IAResponseDTO.AsignacionDTO asig : distribucion) {
             sb.append(String.format("%d%% en %s, ", asig.getPorcentaje(), asig.getTipoActivo()));
         }
+
+        // Cripto según perfil
+        cripto.stream()
+                .filter(c -> c.getSimbolo().equals("BTCUSDT"))
+                .findFirst()
+                .ifPresent(btc -> sb.append(String.format(" Cripto: BTC en %s (%d/4 checks) — %s",
+                        btc.getVeredicto(), btc.getChecksPasados(),
+                        switch (perfil) {
+                            case "Conservador" -> "demasiado volátil para tu perfil, evitá. ";
+                            case "Agresivo" -> "podés considerarla si el veredicto es BUY o WATCH. ";
+                            default -> "solo como cobertura chica si el veredicto no es AVOID. ";
+                        })));
 
         // Cierre
         sb.append(String.format("para un plazo de %d meses con $%,.0f.", plazoMeses, monto));
