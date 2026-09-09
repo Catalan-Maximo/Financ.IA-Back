@@ -18,3 +18,9 @@ groq:
     base-url: https://api.groq.com/openai/v1
     key: ${GROQ_API_KEY:}
     model: openai/gpt-oss-120b
+
+# JWT — la clave secreta va por variable de entorno JWT_SECRET
+# (mínimo 32 caracteres). Sin ella, la app no arranca.
+jwt:
+  secret: ${JWT_SECRET:}
+  expiracion-horas: 24
