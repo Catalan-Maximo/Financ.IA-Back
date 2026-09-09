@@ -15,6 +15,9 @@ public class Usuario {
     private String nombre;
     private String email;
 
+    /** Contraseña hasheada con BCrypt (null en usuarios creados antes del auth). */
+    private String password;
+
     /** Suma total de puntos del test (8 a 49). */
     private Integer puntaje;
 
