@@ -25,4 +25,7 @@ public interface TasaMercadoRepository extends JpaRepository<TasaMercado, Long> 
 
     /** Evita guardar dos veces la misma billetera el mismo día. */
     boolean existsByTipoActivoAndEntidadAndFecha(String tipoActivo, String entidad, LocalDate fecha);
+
+    /** Últimos 30 registros de una entidad (para el gráfico de historial). */
+    List<TasaMercado> findTop30ByEntidadOrderByFechaAsc(String entidad);
 }

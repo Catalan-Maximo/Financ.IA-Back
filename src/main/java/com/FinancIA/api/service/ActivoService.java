@@ -4,7 +4,10 @@ import com.FinancIA.api.domain.TasaMercado;
 import com.FinancIA.api.dto.ComparacionRequest;
 import com.FinancIA.api.dto.ComparacionResponse;
 import com.FinancIA.api.dto.RendimientoDTO;
+import com.FinancIA.api.dto.VersusRequestDTO;
+import com.FinancIA.api.dto.VersusResponseDTO;
 import com.FinancIA.api.repository.TasaMercadoRepository;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -36,6 +39,7 @@ import java.util.Map;
  * ─────────────────────────────────────────────────────────
  */
 @Service
+@Slf4j
 public class ActivoService {
 
     /** Tipo de activo para la tasa BADLAR (plazos fijos de bancos privados). */
@@ -48,9 +52,11 @@ public class ActivoService {
     public static final String BILLETERA = "Billetera Virtual";
 
     private final TasaMercadoRepository tasaRepository;
+    private final MercadoService mercadoService;
 
-    public ActivoService(TasaMercadoRepository tasaRepository) {
+    public ActivoService(TasaMercadoRepository tasaRepository, MercadoService mercadoService) {
         this.tasaRepository = tasaRepository;
+        this.mercadoService = mercadoService;
     }
 
     /**
@@ -58,6 +64,59 @@ public class ActivoService {
      */
     public List<Map<String, Object>> getActivos() {
         return construirActivosDesdeBD();
+    }
+
+    /**
+     * VERSUS: compara dos activos cara a cara. Si ambos son proyectables
+     * (acciones/ETF/cripto), la probabilidad sale del Monte Carlo con
+     * escenarios emparejados; si no, el ganador es el de mayor tasa real.
+     */
+    public VersusResponseDTO compararVersus(VersusRequestDTO request) {
+        ComparacionRequest comp = new ComparacionRequest();
+        comp.setMonto(request.getMonto());
+        comp.setPlazoMeses(request.getPlazoMeses());
+        comp.setInflacionMensual(request.getInflacionMensual());
+
+        List<RendimientoDTO> rendimientos = compararActivos(comp).getRendimientos();
+
+        RendimientoDTO a = rendimientos.stream()
+                .filter(r -> r.getTipo().equalsIgnoreCase(request.getEntidadA())
+                        || r.getEntidad().equalsIgnoreCase(request.getEntidadA()))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("Activo no encontrado: " + request.getEntidadA()));
+        RendimientoDTO b = rendimientos.stream()
+                .filter(r -> r.getTipo().equalsIgnoreCase(request.getEntidadB())
+                        || r.getEntidad().equalsIgnoreCase(request.getEntidadB()))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("Activo no encontrado: " + request.getEntidadB()));
+
+        Double probabilidadA = mercadoService.probabilidadSupera(
+                request.getEntidadA(), request.getEntidadB(), request.getPlazoMeses());
+
+        if (probabilidadA != null) {
+            boolean ganaA = probabilidadA >= 0.5;
+            String ganador = nombreMostrable(ganaA ? a : b);
+            double pct = ganaA ? probabilidadA * 100 : (1 - probabilidadA) * 100;
+            String mensaje = String.format(
+                    "%s gana en el %.0f%% de los 10.000 escenarios simulados. "
+                    + "Ojo: en el peor 5%% puede rendir %+.1f%%.%n",
+                    ganador, pct, ganaA ? a.getPeorEscenario() : b.getPeorEscenario());
+            return new VersusResponseDTO(a, b, ganador, probabilidadA, mensaje);
+        }
+
+        // Al menos uno es renta fija: comparamos la tasa real mensual
+        boolean ganaA = a.getTasaRealMensual() >= b.getTasaRealMensual();
+        RendimientoDTO ganador = ganaA ? a : b;
+        RendimientoDTO perdedor = ganaA ? b : a;
+        return new VersusResponseDTO(a, b, nombreMostrable(ganador), null,
+                String.format("%s le gana a %s: %+.2f%% real mensual contra %+.2f%%.",
+                        nombreMostrable(ganador), nombreMostrable(perdedor),
+                        ganador.getTasaRealMensual(), perdedor.getTasaRealMensual()));
+    }
+
+    /** Nombre único para mostrar: "BCRA" aparece dos veces (plazo fijo y dólar). */
+    private String nombreMostrable(RendimientoDTO r) {
+        return "BCRA".equals(r.getEntidad()) ? r.getTipo() : r.getEntidad();
     }
 
     /**
@@ -69,7 +128,17 @@ public class ActivoService {
         int    plazoMeses       = request.getPlazoMeses();
         double inflacionMensual = request.getInflacionMensual();
 
-        List<RendimientoDTO> rendimientos = construirActivosDesdeBD().stream()
+        List<Map<String, Object>> activos = construirActivosDesdeBD();
+
+        // Acciones/ETFs y cripto proyectados con Monte Carlo.
+        // Si Yahoo/Binance no responden, la comparación sigue con renta fija.
+        try {
+            activos.addAll(mercadoService.activosProyectados(plazoMeses));
+        } catch (Exception e) {
+            log.warn("No se pudieron proyectar acciones/cripto: {}", e.getMessage());
+        }
+
+        List<RendimientoDTO> rendimientos = activos.stream()
                 .map(activo -> calcularRendimiento(activo, monto, plazoMeses, inflacionMensual))
                 .toList();
 
@@ -95,7 +164,8 @@ public class ActivoService {
 
         // Plazo fijo: última tasa BADLAR publicada por el BCRA
         tasaRepository.findTop1ByTipoActivoOrderByFechaDesc(PLAZO_FIJO).ifPresent(tasa ->
-                activos.add(Map.of("entidad", "BCRA", "tna", tasa.getValor(), "tipo", PLAZO_FIJO)));
+                activos.add(Map.of("entidad", "BCRA", "tna", tasa.getValor(), "tipo", PLAZO_FIJO,
+                        "riesgo", "Bajo")));
 
         // Dólar oficial: variación de los últimos 30 días anualizada.
         // Necesita al menos 2 registros (hoy + uno anterior) para poder
@@ -111,7 +181,8 @@ public class ActivoService {
             if (hayHistorialReal) {
                 double variacion30d = ultima.getValor() / historial.get(0).getValor() - 1;
                 double tnaAnualizada = (Math.pow(1 + variacion30d, 12) - 1) * 100;
-                activos.add(Map.of("entidad", "BCRA", "tna", redondear(tnaAnualizada), "tipo", DOLAR));
+                activos.add(Map.of("entidad", "BCRA", "tna", redondear(tnaAnualizada), "tipo", DOLAR,
+                        "riesgo", "Bajo"));
             }
         });
 
@@ -124,7 +195,8 @@ public class ActivoService {
             ultimaPorEntidad.putIfAbsent(tasa.getEntidad(), tasa);
         }
         for (TasaMercado tasa : ultimaPorEntidad.values()) {
-            activos.add(Map.of("entidad", tasa.getEntidad(), "tna", tasa.getValor(), "tipo", BILLETERA));
+            activos.add(Map.of("entidad", tasa.getEntidad(), "tna", tasa.getValor(), "tipo", BILLETERA,
+                    "riesgo", "Bajo"));
         }
 
         // Ordenamos de mayor a menor tasa para que el dashboard muestre
@@ -164,6 +236,13 @@ public class ActivoService {
         // Ganancia Real: monto × (1 + TasaReal)^plazo - monto
         double gananciaReal = monto * Math.pow(1 + tasaReal, plazoMeses) - monto;
 
+        // Rango Monte Carlo (solo para acciones/ETF y cripto; null en renta fija)
+        Double peor = activo.containsKey("peor")
+                ? ((Number) activo.get("peor")).doubleValue() : null;
+        Double mejor = activo.containsKey("mejor")
+                ? ((Number) activo.get("mejor")).doubleValue() : null;
+        String riesgo = activo.containsKey("riesgo") ? (String) activo.get("riesgo") : "Bajo";
+
         return RendimientoDTO.builder()
                 .entidad(entidad)
                 .tipo(tipo)
@@ -173,6 +252,9 @@ public class ActivoService {
                 .gananciaNominal(redondear(gananciaNominal))
                 .gananciaReal(redondear(gananciaReal))
                 .leGanaALaInflacion(tasaReal > 0)
+                .peorEscenario(peor)
+                .mejorEscenario(mejor)
+                .riesgo(riesgo)
                 .build();
     }
 

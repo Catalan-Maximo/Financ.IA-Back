@@ -7,6 +7,7 @@ import org.springframework.web.client.RestClient;
 
 import java.time.Duration;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -42,6 +43,35 @@ public class BcraClient {
 
     /** Un valor de una serie con su fecha de publicación. */
     public record SerieValor(LocalDate fecha, double valor) {}
+
+    /**
+     * Historial de una serie (para gráficos): [{fecha, valor}] de los
+     * últimos `dias` registros, del más antiguo al más nuevo.
+     */
+    @SuppressWarnings("unchecked")
+    public List<Map<String, Object>> historial(int idVariable, int dias) {
+        Map<String, Object> body = restClient.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/estadisticas/v4.0/Monetarias/{id}")
+                        .queryParam("Limit", dias)
+                        .build(idVariable))
+                .retrieve()
+                .body(new ParameterizedTypeReference<Map<String, Object>>() {});
+
+        List<Map<String, Object>> results = (List<Map<String, Object>>) body.get("results");
+        List<Map<String, Object>> detalle = (List<Map<String, Object>>) results.get(0).get("detalle");
+
+        // La API devuelve del más nuevo al más viejo: invertimos para el gráfico
+        List<Map<String, Object>> puntos = new ArrayList<>();
+        for (int i = detalle.size() - 1; i >= 0; i--) {
+            Map<String, Object> d = detalle.get(i);
+            puntos.add(Map.of(
+                    "fecha", (String) d.get("fecha"),
+                    "valor", ((Number) d.get("valor")).doubleValue()
+            ));
+        }
+        return puntos;
+    }
 
     /**
      * Devuelve el último valor publicado de una serie del BCRA.

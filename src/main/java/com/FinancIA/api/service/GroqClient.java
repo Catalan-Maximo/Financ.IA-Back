@@ -59,14 +59,31 @@ public class GroqClient {
      *                     distribución, perfil, monto, plazo, inflación)
      * @return el texto generado por el modelo
      */
-    @SuppressWarnings("unchecked")
     public String generarRecomendacion(String systemPrompt, String userPrompt) {
+        return enviar(systemPrompt, List.of(Map.of("rol", "user", "contenido", userPrompt)));
+    }
+
+    /**
+     * Chat libre: recibe la historia completa de mensajes
+     * ([{rol: user|assistant, contenido}]) y devuelve la respuesta.
+     */
+    public String chat(String systemPrompt, List<Map<String, String>> mensajes) {
+        return enviar(systemPrompt, mensajes);
+    }
+
+    @SuppressWarnings("unchecked")
+    private String enviar(String systemPrompt, List<Map<String, String>> mensajes) {
+        // La API de Groq espera las claves en inglés ("role" / "content");
+        // internamente usamos "rol" / "contenido" y convertimos acá.
+        List<Map<String, String>> historial = new java.util.ArrayList<>();
+        historial.add(Map.of("role", "system", "content", systemPrompt));
+        for (Map<String, String> m : mensajes) {
+            historial.add(Map.of("role", m.get("rol"), "content", m.get("contenido")));
+        }
+
         Map<String, Object> body = Map.of(
                 "model", model,
-                "messages", List.of(
-                        Map.of("role", "system", "content", systemPrompt),
-                        Map.of("role", "user", "content", userPrompt)
-                ),
+                "messages", historial,
                 "temperature", 0.7,
                 "max_tokens", 600
         );

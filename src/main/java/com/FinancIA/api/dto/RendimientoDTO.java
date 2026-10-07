@@ -37,4 +37,13 @@ public class RendimientoDTO {
 
     /** true si la tasa real mensual supera la inflación. */
     private boolean leGanaALaInflacion;
+
+    /** Percentil 5 del retorno total del horizonte (Monte Carlo), null en renta fija. */
+    private Double peorEscenario;
+
+    /** Percentil 95 del retorno total del horizonte (Monte Carlo), null en renta fija. */
+    private Double mejorEscenario;
+
+    /** Nivel de riesgo: "Bajo" / "Medio" / "Alto" / "Extremo" (según volatilidad histórica). */
+    private String riesgo;
 }
