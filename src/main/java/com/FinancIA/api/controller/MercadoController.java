@@ -1,5 +1,6 @@
 package com.FinancIA.api.controller;
 
+import jakarta.validation.Valid;
 import com.FinancIA.api.domain.CriptoEstado;
 import com.FinancIA.api.dto.AccionCotizacion;
 import com.FinancIA.api.dto.DolarCotizacion;
@@ -12,6 +13,7 @@ import com.FinancIA.api.service.BinanceClient;
 import com.FinancIA.api.service.BcraClient;
 import com.FinancIA.api.service.MercadoService;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -37,15 +39,18 @@ public class MercadoController {
     private final CriptoEstadoRepository criptoRepository;
     private final ActivoService activoService;
     private final BcraClient bcraClient;
+    private final BinanceClient binanceClient;
 
     public MercadoController(MercadoService mercadoService,
                              CriptoEstadoRepository criptoRepository,
                              ActivoService activoService,
-                             BcraClient bcraClient) {
+                             BcraClient bcraClient,
+                             BinanceClient binanceClient) {
         this.mercadoService = mercadoService;
         this.criptoRepository = criptoRepository;
         this.activoService = activoService;
         this.bcraClient = bcraClient;
+        this.binanceClient = binanceClient;
     }
 
     @GetMapping("/acciones")
@@ -73,7 +78,7 @@ public class MercadoController {
 
     /** POST /mercados/versus — comparación cara a cara con probabilidad Monte Carlo. */
     @PostMapping("/versus")
-    public VersusResponseDTO versus(@RequestBody VersusRequestDTO request) {
+    public VersusResponseDTO versus(@RequestBody @Valid VersusRequestDTO request) {
         return activoService.compararVersus(request);
     }
 
@@ -81,5 +86,63 @@ public class MercadoController {
     @GetMapping("/dolar-historial")
     public List<Map<String, Object>> dolarHistorial(@RequestParam(defaultValue = "30") int dias) {
         return bcraClient.historial(BcraClient.SERIE_DOLAR_MINORISTA, dias);
+    }
+
+    /** Nombres amigables de las criptos extra. */
+    private static final java.util.Map<String, String> NOMBRES_CRIPTO = java.util.Map.of(
+            "SOLUSDT", "Solana", "ADAUSDT", "Cardano", "XRPUSDT", "XRP",
+            "DOGEUSDT", "Dogecoin", "BNBUSDT", "BNB", "LTCUSDT", "Litecoin");
+
+    /**
+     * GET /mercados/cripto-info — precio y variación 24h de las criptos
+     * extra (solo informativo: el análisis y las recomendaciones siguen
+     * siendo exclusivos de BTC y ETH).
+     */
+    @GetMapping("/cripto-info")
+    public List<Map<String, Object>> criptoInfo() {
+        List<Map<String, Object>> info = new java.util.ArrayList<>();
+        for (String simbolo : BinanceClient.OTRAS_CRIPTOS) {
+            try {
+                List<Double> closes = binanceClient.velasDiarias(simbolo, 2).stream()
+                        .map(BinanceClient.Candle::close)
+                        .toList();
+                if (closes.size() < 2) continue;
+                double precio = closes.get(closes.size() - 1);
+                double variacion = (precio / closes.get(0) - 1) * 100;
+                info.add(Map.of(
+                        "simbolo", simbolo,
+                        "nombre", NOMBRES_CRIPTO.getOrDefault(simbolo, simbolo),
+                        "precio", Math.round(precio * 100.0) / 100.0,
+                        "variacion24h", Math.round(variacion * 100.0) / 100.0
+                ));
+            } catch (Exception e) {
+                logCripto(simbolo, e);
+            }
+        }
+        return info;
+    }
+
+    private void logCripto(String simbolo, Exception e) {
+        // Binance no respondió para esta cripto: la omitimos de la lista
+        org.slf4j.LoggerFactory.getLogger(MercadoController.class)
+                .warn("Sin info para {}: {}", simbolo, e.getMessage());
+    }
+
+    /** GET /mercados/fundamentales/{ticker} — P/E, ingresos, margen y deuda (Yahoo). */
+    @GetMapping("/fundamentales/{ticker}")
+    public com.FinancIA.api.dto.FundamentalesDTO fundamentales(@PathVariable String ticker) {
+        return mercadoService.fundamentales(ticker);
+    }
+
+    /** GET /mercados/acciones/{ticker}/velas — cierres diarios para el gráfico. */
+    @GetMapping("/acciones/{ticker}/velas")
+    public List<Map<String, Object>> velasAccion(@PathVariable String ticker) {
+        return mercadoService.velasAccion(ticker);
+    }
+
+    /** GET /mercados/noticias — noticias financieras destacadas (Yahoo). */
+    @GetMapping("/noticias")
+    public List<Map<String, Object>> noticias() {
+        return mercadoService.noticias();
     }
 }

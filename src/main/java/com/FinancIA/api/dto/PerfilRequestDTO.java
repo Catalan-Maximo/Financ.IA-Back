@@ -1,5 +1,6 @@
 package com.FinancIA.api.dto;
 
+import jakarta.validation.constraints.Min;
 import lombok.Data;
 
 /**
@@ -17,5 +18,6 @@ public class PerfilRequestDTO {
     private String email;
 
     /** Suma total de puntos del test de 10 preguntas (8 a 49). */
+    @Min(0)
     private int puntaje;
 }

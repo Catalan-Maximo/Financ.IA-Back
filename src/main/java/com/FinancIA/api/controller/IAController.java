@@ -1,7 +1,9 @@
 package com.FinancIA.api.controller;
 
+import jakarta.validation.Valid;
 import com.FinancIA.api.dto.ChatRequestDTO;
 import com.FinancIA.api.dto.ChatResponseDTO;
+import com.FinancIA.api.dto.ExplicarRequestDTO;
 import com.FinancIA.api.dto.IARequestDTO;
 import com.FinancIA.api.dto.IAResponseDTO;
 import com.FinancIA.api.service.IAService;
@@ -32,12 +34,18 @@ public class IAController {
     }
 
     @PostMapping("/simular")
-    public IAResponseDTO simularConIA(@RequestBody IARequestDTO request) {
+    public IAResponseDTO simularConIA(@RequestBody @Valid IARequestDTO request) {
         return iaService.generarRecomendacion(request);
     }
 
     @PostMapping("/chat")
     public ChatResponseDTO chat(@RequestBody ChatRequestDTO request) {
         return iaService.responderChat(request);
+    }
+
+    /** POST /ia/explicar — explica un bloque de datos financieros en criollo. */
+    @PostMapping("/explicar")
+    public ChatResponseDTO explicar(@RequestBody ExplicarRequestDTO request) {
+        return iaService.explicar(request);
     }
 }

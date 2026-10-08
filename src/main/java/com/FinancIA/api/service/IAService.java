@@ -79,6 +79,34 @@ public class IAService {
     }
 
     /**
+     * Explica un bloque de datos financieros en palabras simples,
+     * para usuarios que no saben de economía. Fallback: devuelve el texto tal cual.
+     */
+    public ChatResponseDTO explicar(ExplicarRequestDTO request) {
+        String prompt = """
+                Explicá estos datos financieros en palabras SIMPLES, para una persona
+                que no sabe de economía. Qué significa cada número, si es bueno o malo,
+                y qué debería hacer el usuario con esa información. 3-5 oraciones,
+                español rioplatense, sin jerga. NO inventes números.
+
+                Datos:
+                %s
+                """.formatted(request.getDatos());
+
+        if (!groqClient.estaConfigurado()) {
+            return new ChatResponseDTO("No tengo IA disponible ahora. Probá más tarde.");
+        }
+        try {
+            String respuesta = groqClient.generarRecomendacion(
+                    "Sos un traductor de finanzas a lenguaje cotidiano.", prompt);
+            return new ChatResponseDTO(respuesta.trim());
+        } catch (Exception e) {
+            log.warn("Explicación no disponible: {}", e.getMessage());
+            return new ChatResponseDTO("No pude explicarlo ahora. Intentá de nuevo en unos segundos.");
+        }
+    }
+
+    /**
      * Chat de dudas: responde con los datos vivos de la app como contexto.
      * La conversación completa viaja en el request y Groq la continúa.
      */
@@ -155,6 +183,14 @@ public class IAService {
             sb.append(mercadoService.packs().stream()
                     .map(p -> String.format("%s [%s] %+.2f%%", p.nombre(), p.riesgo(), p.variacion24h()))
                     .collect(java.util.stream.Collectors.joining(", ")));
+            sb.append("\n");
+        } catch (Exception e) {
+            sb.append("sin dato\n");
+        }
+
+        try {
+            sb.append("- Fundamentales de acciones (Yahoo): ");
+            sb.append(String.join(" | ", mercadoService.resumenFundamentales()));
         } catch (Exception e) {
             sb.append("sin dato");
         }

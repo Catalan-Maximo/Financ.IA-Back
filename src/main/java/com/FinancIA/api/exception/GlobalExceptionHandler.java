@@ -35,6 +35,16 @@ public class GlobalExceptionHandler {
         return construir(HttpStatus.BAD_REQUEST, e.getMessage(), request);
     }
 
+    /** Errores de validación de DTOs (@Valid): 400 con el detalle de cada campo. */
+    @ExceptionHandler(org.springframework.web.bind.MethodArgumentNotValidException.class)
+    public ResponseEntity<ErrorResponse> manejarValidacion(
+            org.springframework.web.bind.MethodArgumentNotValidException e, HttpServletRequest request) {
+        String mensaje = e.getBindingResult().getFieldErrors().stream()
+                .map(f -> f.getField() + ": " + f.getDefaultMessage())
+                .collect(java.util.stream.Collectors.joining("; "));
+        return construir(HttpStatus.BAD_REQUEST, mensaje, request);
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> manejarErrorGenerico(
             Exception e, HttpServletRequest request) {

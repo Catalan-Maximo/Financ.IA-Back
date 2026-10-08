@@ -2,6 +2,7 @@ package com.FinancIA.api.service;
 
 import com.FinancIA.api.dto.AccionCotizacion;
 import com.FinancIA.api.dto.DolarCotizacion;
+import com.FinancIA.api.dto.FundamentalesDTO;
 import com.FinancIA.api.dto.PackCotizacion;
 import com.FinancIA.api.domain.PackComposicion;
 import com.FinancIA.api.repository.PackComposicionRepository;
@@ -23,7 +24,7 @@ import java.util.Map;
 public class MercadoService {
 
     /** Tickers que mostramos en la sección Acciones. */
-    public static final List<String> TICKERS = List.of("AAPL", "MSFT", "SPY", "YPF", "GGAL");
+    public static final List<String> TICKERS = List.of("AAPL", "MSFT", "SPY", "YPF", "GGAL", "MELI");
 
     private final YahooFinanceClient yahooClient;
     private final DolarApiClient dolarApiClient;
@@ -46,11 +47,38 @@ public class MercadoService {
         this.composicionRepository = composicionRepository;
     }
 
-    /** Cotizaciones de las acciones/ETFs con variación de 24h. */
+    /** Cache en memoria de valoraciones por P/E (TTL 6h, cambian poco). */
+    private final java.util.concurrent.ConcurrentHashMap<String, CacheValoracion> cacheValoracion =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    private record CacheValoracion(java.time.Instant guardado, FundamentalesDTO fundamentales) {}
+
+    /** Cotizaciones de las acciones/ETFs con variación de 24h y valoración por P/E. */
     public List<AccionCotizacion> acciones() {
         return TICKERS.stream()
-                .map(this::cotizacionSegura)
+                .map(ticker -> {
+                    AccionCotizacion base = cotizacionSegura(ticker);
+                    return new AccionCotizacion(
+                            base.ticker(), base.precio(), base.variacion24h(),
+                            valoracionCacheada(ticker));
+                })
                 .toList();
+    }
+
+    /** Valoración por P/E con cache: evita pegarle a Yahoo por cada request de la lista. */
+    private String valoracionCacheada(String ticker) {
+        try {
+            CacheValoracion cache = cacheValoracion.get(ticker);
+            if (cache != null && cache.guardado().isAfter(java.time.Instant.now().minus(6, java.time.temporal.ChronoUnit.HOURS))) {
+                return cache.fundamentales().valoracionPrecio();
+            }
+            FundamentalesDTO f = fundamentales(ticker);
+            cacheValoracion.put(ticker, new CacheValoracion(java.time.Instant.now(), f));
+            return f.valoracionPrecio();
+        } catch (Exception e) {
+            log.warn("Sin valoración para {}: {}", ticker, e.getMessage());
+            return "n/d";
+        }
     }
 
     /** Cotizaciones del dólar (DolarAPI). */
@@ -95,6 +123,16 @@ public class MercadoService {
         return yahooClient.velas3m(ticker);
     }
 
+    /** Cierres diarios con fecha (para el gráfico de una acción). */
+    public List<Map<String, Object>> velasAccion(String ticker) {
+        return yahooClient.velasConFecha(ticker, 90);
+    }
+
+    /** Noticias financieras destacadas (Yahoo). */
+    public List<Map<String, Object>> noticias() {
+        return yahooClient.noticias(10);
+    }
+
     /**
      * Probabilidad de que el activo A supere a B (Monte Carlo, escenarios
      * emparejados). Null si alguno de los dos no es proyectable (renta fija).
@@ -104,6 +142,91 @@ public class MercadoService {
         List<Double> closesB = closesDe(entidadB);
         if (closesA.size() < 2 || closesB.size() < 2) return null;
         return monteCarloService.probabilidadSupera(closesA, closesB, meses);
+    }
+
+    /**
+     * Fundamentales de una acción (P/E, ingresos, margen, deuda) con la
+     * valoración simple: P/E < 20 barata, 20-30 razonable, > 30 cara.
+     */
+    @SuppressWarnings("unchecked")
+    public FundamentalesDTO fundamentales(String ticker) {
+        Map<String, Object> raw = yahooClient.fundamentalesRaw(ticker);
+
+        Map<String, Object> fd = (Map<String, Object>) raw.get("financialData");
+        Map<String, Object> ks = (Map<String, Object>) raw.get("defaultKeyStatistics");
+
+        Double pe = rawDouble(ks != null ? ks.get("forwardPE") : null);
+        if (pe == null && fd != null) pe = rawDouble(fd.get("trailingPE"));
+
+        String valoracion = pe == null ? "n/d"
+                : pe < 20 ? "Barata"
+                : pe <= 30 ? "Razonable"
+                : "Cara";
+
+        Double deuda = rawDouble(fd != null ? fd.get("totalDebt") : null);
+        Double caja = rawDouble(fd != null ? fd.get("totalCash") : null);
+
+        List<FundamentalesDTO.IngresoAnual> anuales = new java.util.ArrayList<>();
+        Map<String, Object> hist = (Map<String, Object>) raw.get("incomeStatementHistory");
+        if (hist != null) {
+            List<Map<String, Object>> items =
+                    (List<Map<String, Object>>) hist.get("incomeStatementHistory");
+            if (items != null) {
+                // La API devuelve del año más nuevo al más viejo: tomamos los últimos 4 y los damos en orden
+                int desde = Math.max(0, items.size() - 4);
+                for (int i = desde; i < items.size(); i++) {
+                    Map<String, Object> item = items.get(i);
+                    String anio = String.valueOf(
+                            ((Map<String, Object>) item.get("endDate")).get("fmt"));
+                    anuales.add(new FundamentalesDTO.IngresoAnual(
+                            anio.substring(0, 4),
+                            rawDouble(item.get("totalRevenue")) == null ? 0 : rawDouble(item.get("totalRevenue")),
+                            rawDouble(item.get("netIncome")) == null ? 0 : rawDouble(item.get("netIncome"))
+                    ));
+                }
+            }
+        }
+
+        Double crecimiento = rawDouble(fd != null ? fd.get("revenueGrowth") : null);
+        Double margen = rawDouble(fd != null ? fd.get("profitMargins") : null);
+
+        return new FundamentalesDTO(
+                ticker,
+                pe,
+                valoracion,
+                crecimiento == null ? null : crecimiento * 100,
+                margen == null ? null : margen * 100,
+                deuda,
+                caja,
+                deuda != null && caja != null && deuda > caja,
+                anuales
+        );
+    }
+
+    /** Resumen de fundamentales por ticker para el contexto del chat. */
+    public List<String> resumenFundamentales() {
+        List<String> lineas = new java.util.ArrayList<>();
+        for (String ticker : TICKERS) {
+            try {
+                FundamentalesDTO f = fundamentales(ticker);
+                lineas.add(String.format(
+                        "%s: P/E %s (%s), ingresos %+.1f%% anual, margen neto %s",
+                        ticker, f.pe() == null ? "n/d" : String.format("%.1f", f.pe()),
+                        f.valoracionPrecio(),
+                        f.crecimientoIngresosPct() == null ? 0 : f.crecimientoIngresosPct(),
+                        f.margenNetoPct() == null ? "n/d" : String.format("%.1f%%", f.margenNetoPct())));
+            } catch (Exception e) {
+                log.warn("Sin fundamentales para {}: {}", ticker, e.getMessage());
+            }
+        }
+        return lineas;
+    }
+
+    /** Lee el "raw" de un nodo de Yahoo ({"raw": 123, "fmt": "123"}). */
+    private Double rawDouble(Object nodo) {
+        if (!(nodo instanceof Map<?, ?> m)) return null;
+        Object raw = m.get("raw");
+        return raw instanceof Number n ? n.doubleValue() : null;
     }
 
     /** Precio actual de un activo (acciones/ETF y cripto); null para renta fija. */
@@ -218,7 +341,7 @@ public class MercadoService {
             return yahooClient.cotizacion(ticker);
         } catch (Exception e) {
             log.warn("No se pudo cotizar {}: {}", ticker, e.getMessage());
-            return new AccionCotizacion(ticker, 0, 0);
+            return new AccionCotizacion(ticker, 0, 0, "n/d");
         }
     }
 

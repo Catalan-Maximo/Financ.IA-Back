@@ -1,8 +1,10 @@
 package com.FinancIA.api.service;
 
 import com.FinancIA.api.domain.CriptoEstado;
+import com.FinancIA.api.domain.Posicion;
 import com.FinancIA.api.domain.Usuario;
 import com.FinancIA.api.repository.CriptoEstadoRepository;
+import com.FinancIA.api.repository.PosicionRepository;
 import com.FinancIA.api.repository.UsuarioRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -22,26 +24,33 @@ import java.util.List;
  *   último snapshot guardado en BD.
  * - Si el veredicto cambió respecto del día anterior, envía push
  *   a los usuarios que habilitaron notificaciones.
+ * - Stop-loss: avisa (una vez por día por posición) si una posición
+ *   cripto del portafolio cayó 10% o más desde su precio de compra.
  */
 @Service
 @Slf4j
 public class CriptoDataJob {
 
+    private static final double STOP_LOSS_PCT = -10.0;
+
     private final BinanceClient binanceClient;
     private final CriptoChecklistService checklist;
     private final CriptoEstadoRepository repository;
     private final UsuarioRepository usuarioRepository;
+    private final PosicionRepository posicionRepository;
     private final ExpoPushClient expoPushClient;
 
     public CriptoDataJob(BinanceClient binanceClient,
                          CriptoChecklistService checklist,
                          CriptoEstadoRepository repository,
                          UsuarioRepository usuarioRepository,
+                         PosicionRepository posicionRepository,
                          ExpoPushClient expoPushClient) {
         this.binanceClient = binanceClient;
         this.checklist = checklist;
         this.repository = repository;
         this.usuarioRepository = usuarioRepository;
+        this.posicionRepository = posicionRepository;
         this.expoPushClient = expoPushClient;
     }
 
@@ -96,6 +105,7 @@ public class CriptoDataJob {
                 estado.getVeredicto(), estado.getChecksPasados());
 
         notificarCambioVeredicto(simbolo, estado.getVeredicto());
+        notificarStopLoss(simbolo, estado.getPrecio());
     }
 
     /** Si el veredicto cambió vs el día anterior, manda push a todos los usuarios. */
@@ -118,6 +128,39 @@ public class CriptoDataJob {
             } catch (Exception e) {
                 log.warn("No se pudo enviar push a {}: {}", usuario.getEmail(), e.getMessage());
             }
+        }
+    }
+
+    /**
+     * Stop-loss del portafolio: si una posición cripto cayó 10% o más
+     * desde su precio de compra, avisa por push (una vez por día por posición).
+     */
+    private void notificarStopLoss(String simbolo, double precioActual) {
+        String nombre = simbolo.equals("BTCUSDT") ? "Bitcoin" : "Ethereum";
+        LocalDate hoy = LocalDate.now();
+
+        for (Posicion p : posicionRepository.findByActivo(nombre)) {
+            if (p.getPrecioCompra() <= 0) continue;
+            if (hoy.equals(p.getUltimaAlerta())) continue;
+
+            double pct = (precioActual - p.getPrecioCompra()) / p.getPrecioCompra() * 100;
+            if (pct > STOP_LOSS_PCT) continue;
+
+            p.setUltimaAlerta(hoy);
+            posicionRepository.save(p);
+
+            usuarioRepository.findByEmailIgnoreCase(p.getEmail())
+                    .filter(u -> u.getPushToken() != null && !u.getPushToken().isBlank())
+                    .ifPresent(u -> {
+                        try {
+                            expoPushClient.enviar(u.getPushToken(), "FinancIA — Stop-loss",
+                                    String.format("Tu posición en %s cayó %+.1f%% desde tu compra. Considerá vender.",
+                                            nombre, pct));
+                            log.info("Stop-loss enviado a {} por {}", u.getEmail(), nombre);
+                        } catch (Exception e) {
+                            log.warn("No se pudo enviar stop-loss a {}: {}", u.getEmail(), e.getMessage());
+                        }
+                    });
         }
     }
 

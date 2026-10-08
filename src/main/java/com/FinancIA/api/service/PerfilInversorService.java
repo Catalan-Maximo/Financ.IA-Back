@@ -5,17 +5,16 @@ import org.springframework.stereotype.Service;
 /**
  * Clasifica al inversor según la puntuación del test de perfil.
  *
- * El cuestionario tiene 10 preguntas y la suma total se mueve
- * en un rango de 8 a 49 puntos:
+ * El cuestionario breve tiene 6 preguntas y la suma total se mueve
+ * en un rango de 6 a 29 puntos:
  *
  * ─────────────────────────────────────────────────────────
- *  8 - 18  → Conservador  🛡️ Evita el riesgo, busca liquidez
- * 19 - 35  → Moderado     ⚖️ Tolera fluctuaciones a mediano plazo
- * 36 - 49  → Agresivo     📈 Maximiza rentabilidad a largo plazo
+ *  6 - 13  → Conservador  Evita el riesgo, busca liquidez
+ * 14 - 23  → Moderado     Tolera fluctuaciones a mediano plazo
+ * 24 - 29  → Agresivo     Maximiza rentabilidad a largo plazo
  * ─────────────────────────────────────────────────────────
  *
- * Los valores fuera de rango se clasifican al extremo más cercano
- * (menos de 8 → Conservador, más de 49 → Agresivo).
+ * Los valores fuera de rango se clasifican al extremo más cercano.
  */
 @Service
 public class PerfilInversorService {
@@ -28,8 +27,8 @@ public class PerfilInversorService {
      * Devuelve el perfil de riesgo según la puntuación del test.
      */
     public String clasificar(int puntaje) {
-        if (puntaje <= 18) return CONSERVADOR;
-        if (puntaje <= 35) return MODERADO;
+        if (puntaje <= 13) return CONSERVADOR;
+        if (puntaje <= 23) return MODERADO;
         return AGRESIVO;
     }
 }

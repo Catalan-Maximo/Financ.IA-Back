@@ -1,5 +1,6 @@
 package com.FinancIA.api.controller;
 
+import jakarta.validation.Valid;
 import com.FinancIA.api.dto.ComparacionRequest;
 import com.FinancIA.api.dto.ComparacionResponse;
 import com.FinancIA.api.repository.TasaMercadoRepository;
@@ -63,7 +64,7 @@ public class InversionController {
      * }
      */
     @PostMapping("/activos/comparar")
-    public ComparacionResponse compararActivos(@RequestBody ComparacionRequest request) {
+    public ComparacionResponse compararActivos(@RequestBody @Valid ComparacionRequest request) {
         return activoService.compararActivos(request);
     }
 }

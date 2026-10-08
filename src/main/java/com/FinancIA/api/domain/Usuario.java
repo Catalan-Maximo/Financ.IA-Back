@@ -21,6 +21,9 @@ public class Usuario {
     /** Token de push de Expo (null si el usuario no habilitó notificaciones). */
     private String pushToken;
 
+    /** Ingreso mensual declarado (para el dashboard de gastos). */
+    private Double ingresoMensual;
+
     /** Suma total de puntos del test (8 a 49). */
     private Integer puntaje;
 

@@ -97,6 +97,22 @@ public class GroqClient {
 
         List<Map<String, Object>> choices = (List<Map<String, Object>>) respuesta.get("choices");
         Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
-        return (String) message.get("content");
+        return limpiarMarkdown((String) message.get("content"));
+    }
+
+    /**
+     * Groq a veces devuelve markdown (**negrita**, *cursiva*, `código`, #).
+     * La app lo muestra como texto plano, así que lo limpiamos acá
+     * para que nunca se vean los asteriscos.
+     */
+    private String limpiarMarkdown(String texto) {
+        if (texto == null) return "";
+        return texto
+                .replaceAll("\\*\\*", "")
+                .replaceAll("\\*", "")
+                .replaceAll("`", "")
+                .replaceAll("^#{1,6}\\s*", "")
+                .replaceAll("\\n#{1,6}\\s*", "\n")
+                .trim();
     }
 }

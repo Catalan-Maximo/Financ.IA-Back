@@ -1,5 +1,9 @@
 package com.FinancIA.api.dto;
 
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.PositiveOrZero;
 import lombok.Data;
 
 /**
@@ -12,15 +16,19 @@ import lombok.Data;
 public class IARequestDTO {
 
     /** Perfil de riesgo del inversor: "Conservador", "Moderado" o "Agresivo". */
+    @NotBlank
     private String perfilInversor;
 
     /** Monto disponible para invertir en pesos. */
+    @Positive
     private double monto;
 
     /** Plazo de inversión deseado en meses. */
+    @Min(1)
     private int plazoMeses;
 
     /** Inflación mensual estimada (%, ej. 4.0 = 4%). */
+    @PositiveOrZero
     private double inflacionMensual;
 
     /** Activo A a comparar (ej. "Plazo Fijo"). Opcional. */

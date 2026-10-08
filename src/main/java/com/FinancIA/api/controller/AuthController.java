@@ -1,5 +1,6 @@
 package com.FinancIA.api.controller;
 
+import jakarta.validation.Valid;
 import com.FinancIA.api.domain.Usuario;
 import com.FinancIA.api.dto.AuthRequestDTO;
 import com.FinancIA.api.dto.AuthResponseDTO;
@@ -35,7 +36,7 @@ public class AuthController {
     }
 
     @PostMapping("/register")
-    public AuthResponseDTO registrar(@RequestBody RegisterRequestDTO request) {
+    public AuthResponseDTO registrar(@RequestBody @Valid RegisterRequestDTO request) {
         // Normalizamos el email a minúsculas para evitar duplicados por case
         String email = normalizarEmail(request.getEmail());
 
@@ -54,7 +55,7 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public AuthResponseDTO login(@RequestBody AuthRequestDTO request) {
+    public AuthResponseDTO login(@RequestBody @Valid AuthRequestDTO request) {
         Usuario usuario = usuarioRepository.findByEmailIgnoreCase(normalizarEmail(request.getEmail()))
                 .orElseThrow(() -> new IllegalArgumentException("Credenciales inválidas"));
 

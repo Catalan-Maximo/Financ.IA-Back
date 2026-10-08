@@ -31,4 +31,7 @@ public class Posicion {
     private double precioCompra;
 
     private LocalDate fecha;
+
+    /** Último día en que se envió la alerta de stop-loss (evita spam diario). */
+    private LocalDate ultimaAlerta;
 }

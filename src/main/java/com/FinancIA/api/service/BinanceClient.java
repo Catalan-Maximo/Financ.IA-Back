@@ -21,6 +21,10 @@ public class BinanceClient {
 
     public static final List<String> PARES = List.of("BTCUSDT", "ETHUSDT");
 
+    /** Criptos extra: solo informativas (precio/gráfico), sin análisis ni recomendaciones. */
+    public static final List<String> OTRAS_CRIPTOS =
+            List.of("SOLUSDT", "ADAUSDT", "XRPUSDT", "DOGEUSDT", "BNBUSDT", "LTCUSDT");
+
     private final RestClient restClient;
 
     public BinanceClient() {

@@ -10,4 +10,7 @@ import java.util.List;
 public interface PosicionRepository extends JpaRepository<Posicion, Long> {
 
     List<Posicion> findByEmailOrderByFechaDesc(String email);
+
+    /** Todas las posiciones de un activo (para el stop-loss del job). */
+    List<Posicion> findByActivo(String activo);
 }

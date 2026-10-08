@@ -1,5 +1,6 @@
 package com.FinancIA.api.controller;
 
+import jakarta.validation.Valid;
 import com.FinancIA.api.domain.Usuario;
 import com.FinancIA.api.dto.PerfilRequestDTO;
 import com.FinancIA.api.exception.ResourceNotFoundException;
@@ -39,7 +40,7 @@ public class UsuarioController {
      * { "puntaje": 28 }
      */
     @PostMapping("/perfil")
-    public Usuario guardarPerfil(@RequestBody PerfilRequestDTO request) {
+    public Usuario guardarPerfil(@RequestBody @Valid PerfilRequestDTO request) {
         // El endpoint está protegido por Spring Security: el email viene del JWT
         var authentication = SecurityContextHolder.getContext().getAuthentication();
         String email = (authentication != null) ? authentication.getName() : null;
