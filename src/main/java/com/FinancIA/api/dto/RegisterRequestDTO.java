@@ -8,8 +8,11 @@ import lombok.Data;
 @Data
 public class RegisterRequestDTO {
 
+    /** Constructor explícito: evita el constructor vacío generado por Lombok (corrupto en javac incremental). */
+    public RegisterRequestDTO() {}
+
     @NotBlank
-    private String nombre;
+    private String name;
     @NotBlank
     private String email;
     @Size(min = 6, message = "La contraseña debe tener al menos 6 caracteres")

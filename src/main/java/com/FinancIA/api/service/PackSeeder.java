@@ -1,9 +1,9 @@
 package com.FinancIA.api.service;
 
-import com.FinancIA.api.domain.PackComposicion;
-import com.FinancIA.api.domain.PackInversion;
-import com.FinancIA.api.repository.PackComposicionRepository;
-import com.FinancIA.api.repository.PackInversionRepository;
+import com.FinancIA.api.domain.PackComposition;
+import com.FinancIA.api.domain.InvestmentPack;
+import com.FinancIA.api.repository.PackCompositionRepository;
+import com.FinancIA.api.repository.InvestmentPackRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -20,37 +20,37 @@ import java.util.List;
 @Slf4j
 public class PackSeeder {
 
-    private final PackInversionRepository packRepository;
-    private final PackComposicionRepository composicionRepository;
+    private final InvestmentPackRepository packRepository;
+    private final PackCompositionRepository compositionRepository;
 
-    public PackSeeder(PackInversionRepository packRepository,
-                      PackComposicionRepository composicionRepository) {
+    public PackSeeder(InvestmentPackRepository packRepository,
+                      PackCompositionRepository compositionRepository) {
         this.packRepository = packRepository;
-        this.composicionRepository = composicionRepository;
+        this.compositionRepository = compositionRepository;
     }
 
     @EventListener(ApplicationReadyEvent.class)
-    public void sembrar() {
+    public void seed() {
         if (packRepository.count() > 0) return;
 
-        crearPack("Argentina Potenciada", "Moderado", List.of("YPF", "GGAL", "SPY"), List.of(40, 35, 25));
-        crearPack("Tecnología Global", "Agresivo", List.of("AAPL", "MSFT", "SPY"), List.of(40, 35, 25));
-        crearPack("Global Estable", "Bajo", List.of("SPY", "AAPL", "MSFT"), List.of(60, 20, 20));
+        createPack("Argentina Potenciada", "Moderado", List.of("YPF", "GGAL", "SPY"), List.of(40, 35, 25));
+        createPack("Tecnología Global", "Agresivo", List.of("AAPL", "MSFT", "SPY"), List.of(40, 35, 25));
+        createPack("Global Estable", "Bajo", List.of("SPY", "AAPL", "MSFT"), List.of(60, 20, 20));
         log.info("Packs iniciales creados");
     }
 
-    private void crearPack(String nombre, String riesgo, List<String> tickers, List<Integer> pesos) {
-        PackInversion pack = new PackInversion();
-        pack.setNombre(nombre);
-        pack.setRiesgo(riesgo);
+    private void createPack(String name, String risk, List<String> tickers, List<Integer> weights) {
+        InvestmentPack pack = new InvestmentPack();
+        pack.setName(name);
+        pack.setRisk(risk);
         packRepository.save(pack);
 
         for (int i = 0; i < tickers.size(); i++) {
-            PackComposicion item = new PackComposicion();
+            PackComposition item = new PackComposition();
             item.setPackId(pack.getId());
             item.setTicker(tickers.get(i));
-            item.setPorcentajePeso(pesos.get(i));
-            composicionRepository.save(item);
+            item.setWeightPercentage(weights.get(i));
+            compositionRepository.save(item);
         }
     }
 }

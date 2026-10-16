@@ -1,9 +1,9 @@
 package com.FinancIA.api.service;
 
-import com.FinancIA.api.domain.CriptoEstado;
+import com.FinancIA.api.domain.CryptoState;
 import com.FinancIA.api.dto.*;
-import com.FinancIA.api.repository.CriptoEstadoRepository;
-import com.FinancIA.api.repository.TasaMercadoRepository;
+import com.FinancIA.api.repository.CryptoStateRepository;
+import com.FinancIA.api.repository.MarketRateRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -61,28 +61,28 @@ public class IAService {
             - Agresivo: entrada permitida si el veredicto es BUY o WATCH.
             """;
 
-    private final ActivoService activoService;
+    private final AssetService assetService;
     private final GroqClient groqClient;
-    private final CriptoEstadoRepository criptoRepository;
-    private final MercadoService mercadoService;
-    private final TasaMercadoRepository tasaRepository;
+    private final CryptoStateRepository cryptoRepository;
+    private final MarketService marketService;
+    private final MarketRateRepository rateRepository;
 
-    public IAService(ActivoService activoService, GroqClient groqClient,
-                     CriptoEstadoRepository criptoRepository,
-                     MercadoService mercadoService,
-                     TasaMercadoRepository tasaRepository) {
-        this.activoService = activoService;
+    public IAService(AssetService assetService, GroqClient groqClient,
+                     CryptoStateRepository cryptoRepository,
+                     MarketService marketService,
+                     MarketRateRepository rateRepository) {
+        this.assetService = assetService;
         this.groqClient = groqClient;
-        this.criptoRepository = criptoRepository;
-        this.mercadoService = mercadoService;
-        this.tasaRepository = tasaRepository;
+        this.cryptoRepository = cryptoRepository;
+        this.marketService = marketService;
+        this.rateRepository = rateRepository;
     }
 
     /**
      * Explica un bloque de datos financieros en palabras simples,
      * para usuarios que no saben de economía. Fallback: devuelve el texto tal cual.
      */
-    public ChatResponseDTO explicar(ExplicarRequestDTO request) {
+    public ChatResponseDTO explain(ExplainRequestDTO request) {
         String prompt = """
                 Explicá estos datos financieros en palabras SIMPLES, para una persona
                 que no sabe de economía. Qué significa cada número, si es bueno o malo,
@@ -91,15 +91,15 @@ public class IAService {
 
                 Datos:
                 %s
-                """.formatted(request.getDatos());
+                """.formatted(request.getData());
 
-        if (!groqClient.estaConfigurado()) {
+        if (!groqClient.isConfigured()) {
             return new ChatResponseDTO("No tengo IA disponible ahora. Probá más tarde.");
         }
         try {
-            String respuesta = groqClient.generarRecomendacion(
+            String answer = groqClient.generateRecommendation(
                     "Sos un traductor de finanzas a lenguaje cotidiano.", prompt);
-            return new ChatResponseDTO(respuesta.trim());
+            return new ChatResponseDTO(answer.trim());
         } catch (Exception e) {
             log.warn("Explicación no disponible: {}", e.getMessage());
             return new ChatResponseDTO("No pude explicarlo ahora. Intentá de nuevo en unos segundos.");
@@ -110,20 +110,20 @@ public class IAService {
      * Chat de dudas: responde con los datos vivos de la app como contexto.
      * La conversación completa viaja en el request y Groq la continúa.
      */
-    public ChatResponseDTO responderChat(ChatRequestDTO request) {
-        if (!groqClient.estaConfigurado()) {
+    public ChatResponseDTO answerChat(ChatRequestDTO request) {
+        if (!groqClient.isConfigured()) {
             return new ChatResponseDTO(
                     "El chat no está disponible ahora (falta la clave de Groq). Probá más tarde.");
         }
 
         try {
-            List<Map<String, String>> mensajes = new ArrayList<>();
-            for (ChatRequestDTO.Mensaje m : request.getMensajes()) {
-                mensajes.add(Map.of("rol", m.rol(), "contenido", m.contenido()));
+            List<Map<String, String>> messages = new ArrayList<>();
+            for (ChatRequestDTO.Message m : request.getMessages()) {
+                messages.add(Map.of("role", m.rol(), "content", m.contenido()));
             }
 
-            String respuesta = groqClient.chat(CHAT_SYSTEM_PROMPT + "\n\n" + construirContextoChat(), mensajes);
-            return new ChatResponseDTO(respuesta.trim());
+            String answer = groqClient.chat(CHAT_SYSTEM_PROMPT + "\n\n" + buildChatContext(), messages);
+            return new ChatResponseDTO(answer.trim());
         } catch (Exception e) {
             log.warn("Chat no disponible: {}", e.getMessage());
             return new ChatResponseDTO("No pude responder ahora mismo. Intentá de nuevo en unos segundos.");
@@ -131,14 +131,14 @@ public class IAService {
     }
 
     /** Snapshot de los datos de la app para que el chat responda con números reales. */
-    private String construirContextoChat() {
+    private String buildChatContext() {
         StringBuilder sb = new StringBuilder();
         sb.append("Datos actuales de la app:\n");
 
         try {
             sb.append("- Inflación mensual oficial: ");
-            tasaRepository.findTop1ByTipoActivoOrderByFechaDesc(MercadoDataJob.INFLACION_MENSUAL)
-                    .ifPresentOrElse(t -> sb.append(String.format("%.1f%%%n", t.getValor())),
+            rateRepository.findTop1ByAssetTypeOrderByDateDesc(MarketDataJob.MONTHLY_INFLATION)
+                    .ifPresentOrElse(t -> sb.append(String.format("%.1f%%%n", t.getValue())),
                             () -> sb.append("sin dato%n"));
         } catch (Exception e) {
             sb.append("sin dato%n");
@@ -146,8 +146,8 @@ public class IAService {
 
         try {
             sb.append("- Tasas de hoy (renta fija y billeteras): ");
-            sb.append(activoService.getActivos().stream()
-                    .map(a -> String.format("%s (%.1f%%)", a.get("entidad"), a.get("tna")))
+            sb.append(assetService.getAssets().stream()
+                    .map(a -> String.format("%s (%.1f%%)", a.get("entity"), a.get("tna")))
                     .collect(java.util.stream.Collectors.joining(", ")));
             sb.append("\n");
         } catch (Exception e) {
@@ -156,12 +156,12 @@ public class IAService {
 
         try {
             sb.append("- Cripto: ");
-            List<CriptoEstado> cripto = BinanceClient.PARES.stream()
-                    .map(par -> criptoRepository.findTop1BySimboloOrderByFechaDesc(par))
+            List<CryptoState> crypto = BinanceClient.PAIRS.stream()
+                    .map(par -> cryptoRepository.findTop1BySymbolOrderByDateDesc(par))
                     .flatMap(Optional::stream)
                     .toList();
-            sb.append(cripto.stream()
-                    .map(c -> String.format("%s $%.0f (%s)", c.getSimbolo(), c.getPrecio(), c.getVeredicto()))
+            sb.append(crypto.stream()
+                    .map(c -> String.format("%s $%.0f (%s)", c.getSymbol(), c.getPrice(), c.getVerdict()))
                     .collect(java.util.stream.Collectors.joining(", ")));
             sb.append("\n");
         } catch (Exception e) {
@@ -170,8 +170,8 @@ public class IAService {
 
         try {
             sb.append("- Dólar: ");
-            sb.append(mercadoService.dolar().stream()
-                    .map(d -> String.format("%s $%.0f", d.nombre(), d.venta()))
+            sb.append(marketService.dollar().stream()
+                    .map(d -> String.format("%s $%.0f", d.name(), d.sellPrice()))
                     .collect(java.util.stream.Collectors.joining(", ")));
             sb.append("\n");
         } catch (Exception e) {
@@ -180,8 +180,8 @@ public class IAService {
 
         try {
             sb.append("- Packs: ");
-            sb.append(mercadoService.packs().stream()
-                    .map(p -> String.format("%s [%s] %+.2f%%", p.nombre(), p.riesgo(), p.variacion24h()))
+            sb.append(marketService.packs().stream()
+                    .map(p -> String.format("%s [%s] %+.2f%%", p.name(), p.risk(), p.variation24h()))
                     .collect(java.util.stream.Collectors.joining(", ")));
             sb.append("\n");
         } catch (Exception e) {
@@ -190,7 +190,7 @@ public class IAService {
 
         try {
             sb.append("- Fundamentales de acciones (Yahoo): ");
-            sb.append(String.join(" | ", mercadoService.resumenFundamentales()));
+            sb.append(String.join(" | ", marketService.fundamentalsSummary()));
         } catch (Exception e) {
             sb.append("sin dato");
         }
@@ -201,95 +201,95 @@ public class IAService {
     /**
      * Genera una recomendación de inversión personalizada.
      */
-    public IAResponseDTO generarRecomendacion(IARequestDTO request) {
-        String perfil           = normalizarPerfil(request.getPerfilInversor());
-        double monto            = request.getMonto();
-        int    plazoMeses       = request.getPlazoMeses();
-        double inflacionMensual = request.getInflacionMensual();
+    public IAResponseDTO generateRecommendation(IARequestDTO request) {
+        String profile           = normalizeProfile(request.getInvestorProfile());
+        double amount            = request.getAmount();
+        int    months       = request.getMonths();
+        double monthlyInflation = request.getMonthlyInflation();
 
         // 1. Calcular rendimientos reales usando ActivoService (datos del BCRA)
-        ComparacionRequest compReq = new ComparacionRequest();
-        compReq.setMonto(monto);
-        compReq.setPlazoMeses(plazoMeses);
-        compReq.setInflacionMensual(inflacionMensual);
+        ComparisonRequest comparisonRequest = new ComparisonRequest();
+        comparisonRequest.setAmount(amount);
+        comparisonRequest.setMonths(months);
+        comparisonRequest.setMonthlyInflation(monthlyInflation);
 
-        ComparacionResponse comparacion = activoService.compararActivos(compReq);
-        List<RendimientoDTO> rendimientos = comparacion.getRendimientos();
+        ComparisonResponse comparison = assetService.compareAssets(comparisonRequest);
+        List<PerformanceDTO> performances = comparison.getPerformances();
 
         // 2. Generar distribución de portafolio según perfil
-        List<IAResponseDTO.AsignacionDTO> distribucion = generarDistribucion(perfil);
+        List<IAResponseDTO.AllocationDTO> allocation = generateAllocation(profile);
 
         // 3. Calcular ganancia real estimada ponderada del portafolio
-        double gananciaRealEstimada = calcularGananciaPonderada(rendimientos, distribucion);
+        double estimatedRealGain = calculateWeightedGain(performances, allocation);
 
         // 3b. Estado cripto (últimos snapshots del job de Binance)
-        List<CriptoEstado> cripto = BinanceClient.PARES.stream()
-                .map(par -> criptoRepository.findTop1BySimboloOrderByFechaDesc(par))
+        List<CryptoState> crypto = BinanceClient.PAIRS.stream()
+                .map(par -> cryptoRepository.findTop1BySymbolOrderByDateDesc(par))
                 .flatMap(Optional::stream)
                 .toList();
 
         // 3c. Mercados reales (packs + dólar) — si las APIs fallan, seguimos sin ese contexto
-        List<PackCotizacion> packs = List.of();
-        List<DolarCotizacion> dolares = List.of();
+        List<PackQuote> packs = List.of();
+        List<DollarQuote> dollars = List.of();
         try {
-            packs = mercadoService.packs();
-            dolares = mercadoService.dolar();
+            packs = marketService.packs();
+            dollars = marketService.dollar();
         } catch (Exception e) {
             log.warn("No se pudieron cargar los mercados para la recomendación: {}", e.getMessage());
         }
 
         // 4. Texto de recomendación: Groq si está disponible, si no rule-based
-        String recomendacion = generarRecomendacionConFallback(
-                perfil, rendimientos, distribucion, cripto, packs, dolares,
-                monto, plazoMeses, inflacionMensual,
-                request.getActivoA(), request.getActivoB()
+        String recommendation = generarRecomendacionConFallback(
+                profile, performances, allocation, crypto, packs, dollars,
+                amount, months, monthlyInflation,
+                request.getAssetA(), request.getAssetB()
         );
 
         // 5. Resumen de estrategia (rule-based, corto y estable)
-        String resumen = generarResumen(perfil, comparacion.getMejorOpcion(), inflacionMensual);
+        String summary = generateSummary(profile, comparison.getBestOption(), monthlyInflation);
 
         return IAResponseDTO.builder()
-                .perfilInversor(perfil)
-                .recomendacion(recomendacion)
-                .nivelRiesgo(mapearNivelRiesgo(perfil))
-                .distribucionSugerida(distribucion)
-                .rendimientos(rendimientos)
-                .gananciaRealEstimada(redondear(gananciaRealEstimada))
-                .resumenEstrategia(resumen)
+                .investorProfile(profile)
+                .recommendation(recommendation)
+                .riskLevel(mapRiskLevel(profile))
+                .suggestedAllocation(allocation)
+                .performances(performances)
+                .estimatedRealGain(round2(estimatedRealGain))
+                .strategySummary(summary)
                 .build();
     }
 
     // ─── Recomendación: Groq con fallback ──────────────────────
 
     private String generarRecomendacionConFallback(
-            String perfil,
-            List<RendimientoDTO> rendimientos,
-            List<IAResponseDTO.AsignacionDTO> distribucion,
-            List<CriptoEstado> cripto,
-            List<PackCotizacion> packs,
-            List<DolarCotizacion> dolares,
-            double monto,
-            int plazoMeses,
-            double inflacionMensual,
-            String activoA,
-            String activoB
+            String profile,
+            List<PerformanceDTO> performances,
+            List<IAResponseDTO.AllocationDTO> allocation,
+            List<CryptoState> crypto,
+            List<PackQuote> packs,
+            List<DollarQuote> dollars,
+            double amount,
+            int months,
+            double monthlyInflation,
+            String assetA,
+            String assetB
     ) {
-        String fallback = generarTextoRecomendacion(
-                perfil, rendimientos, distribucion, cripto, packs, dolares,
-                monto, plazoMeses, inflacionMensual,
-                activoA, activoB
+        String fallback = generateRuleBasedRecommendation(
+                profile, performances, allocation, crypto, packs, dollars,
+                amount, months, monthlyInflation,
+                assetA, assetB
         );
 
-        if (!groqClient.estaConfigurado()) {
+        if (!groqClient.isConfigured()) {
             log.info("GROQ_API_KEY no configurada — usando recomendación rule-based");
             return fallback;
         }
 
         try {
-            String textoGroq = groqClient.generarRecomendacion(
+            String textoGroq = groqClient.generateRecommendation(
                     SYSTEM_PROMPT,
-                    construirPromptUsuario(perfil, rendimientos, distribucion, cripto, packs, dolares,
-                            monto, plazoMeses, inflacionMensual)
+                    buildUserPrompt(profile, performances, allocation, crypto, packs, dollars,
+                            amount, months, monthlyInflation)
             );
             if (textoGroq != null && !textoGroq.isBlank()) {
                 return textoGroq.trim();
@@ -302,56 +302,56 @@ public class IAService {
     }
 
     /** Arma el prompt con los datos calculados para que el LLM solo redacte. */
-    private String construirPromptUsuario(
-            String perfil,
-            List<RendimientoDTO> rendimientos,
-            List<IAResponseDTO.AsignacionDTO> distribucion,
-            List<CriptoEstado> cripto,
-            List<PackCotizacion> packs,
-            List<DolarCotizacion> dolares,
-            double monto,
-            int plazoMeses,
-            double inflacionMensual
+    private String buildUserPrompt(
+            String profile,
+            List<PerformanceDTO> performances,
+            List<IAResponseDTO.AllocationDTO> allocation,
+            List<CryptoState> crypto,
+            List<PackQuote> packs,
+            List<DollarQuote> dollars,
+            double amount,
+            int months,
+            double monthlyInflation
     ) {
         StringBuilder sb = new StringBuilder();
-        sb.append(String.format("Perfil de riesgo: %s.%n", perfil));
-        sb.append(String.format("Monto a invertir: $%,.0f.%n", monto));
-        sb.append(String.format("Plazo: %d meses.%n", plazoMeses));
-        sb.append(String.format("Inflación mensual estimada: %.1f%%.%n", inflacionMensual));
+        sb.append(String.format("Perfil de riesgo: %s.%n", profile));
+        sb.append(String.format("Monto a invertir: $%,.0f.%n", amount));
+        sb.append(String.format("Plazo: %d meses.%n", months));
+        sb.append(String.format("Inflación mensual estimada: %.1f%%.%n", monthlyInflation));
         sb.append(String.format("%nRendimientos calculados con datos reales del BCRA:%n"));
-        for (RendimientoDTO r : rendimientos) {
+        for (PerformanceDTO r : performances) {
             sb.append(String.format(
                     "- %s (%s): TNA %.2f%%, tasa real mensual %+.2f%%, ganancia real estimada $%,.0f%n",
-                    r.getEntidad(), r.getTipo(), r.getTna(), r.getTasaRealMensual(), r.getGananciaReal()
+                    r.getEntity(), r.getType(), r.getTna(), r.getRealMonthlyRate(), r.getRealGain()
             ));
         }
         sb.append(String.format("%nDistribución sugerida por reglas:%n"));
-        for (IAResponseDTO.AsignacionDTO a : distribucion) {
-            sb.append(String.format("- %d%% %s: %s%n", a.getPorcentaje(), a.getTipoActivo(), a.getMotivo()));
+        for (IAResponseDTO.AllocationDTO a : allocation) {
+            sb.append(String.format("- %d%% %s: %s%n", a.getPercentage(), a.getAssetType(), a.getReason()));
         }
         sb.append(String.format("%nEstado cripto (análisis técnico, Binance):%n"));
-        if (cripto.isEmpty()) {
+        if (crypto.isEmpty()) {
             sb.append("- Sin datos cripto disponibles hoy.%n");
         } else {
-            for (CriptoEstado c : cripto) {
+            for (CryptoState c : crypto) {
                 String rsi = c.getRsi14() == null ? "n/d" : String.format("%.1f", c.getRsi14());
                 sb.append(String.format(
                         "- %s: precio $%,.0f, RSI %s, veredicto %s (%d/4 checks)%n",
-                        c.getSimbolo(), c.getPrecio(), rsi, c.getVeredicto(), c.getChecksPasados()
+                        c.getSymbol(), c.getPrice(), rsi, c.getVerdict(), c.getChecksPassed()
                 ));
             }
         }
         sb.append(String.format("%nMercados (cotizaciones reales de hoy):%n"));
-        if (!dolares.isEmpty()) {
-            List<String> dolaresPrincipales = dolares.stream().limit(4)
-                    .map(d -> String.format("%s $%,.0f", d.nombre(), d.venta()))
+        if (!dollars.isEmpty()) {
+            List<String> mainDollars = dollars.stream().limit(4)
+                    .map(d -> String.format("%s $%,.0f", d.name(), d.sellPrice()))
                     .toList();
-            sb.append(String.format("- Dólar (venta): %s%n", String.join(", ", dolaresPrincipales)));
+            sb.append(String.format("- Dólar (venta): %s%n", String.join(", ", mainDollars)));
         }
         if (!packs.isEmpty()) {
             sb.append("- Packs de inversión (variación 24h): ");
             sb.append(packs.stream()
-                    .map(p -> String.format("%s [%s] %+.2f%%", p.nombre(), p.riesgo(), p.variacion24h()))
+                    .map(p -> String.format("%s [%s] %+.2f%%", p.name(), p.risk(), p.variation24h()))
                     .collect(java.util.stream.Collectors.joining(", ")));
             sb.append(String.format("%n"));
         }
@@ -361,42 +361,42 @@ public class IAService {
 
     // ─── Distribución por perfil ────────────────────────────────
 
-    private List<IAResponseDTO.AsignacionDTO> generarDistribucion(String perfil) {
-        return switch (perfil) {
+    private List<IAResponseDTO.AllocationDTO> generateAllocation(String profile) {
+        return switch (profile) {
             case "Conservador" -> List.of(
-                IAResponseDTO.AsignacionDTO.builder()
-                    .tipoActivo("Plazo Fijo Tradicional")
-                    .porcentaje(80)
-                    .motivo("Capital garantizado con tasa regulada por BCRA")
+                IAResponseDTO.AllocationDTO.builder()
+                    .assetType("Plazo Fijo Tradicional")
+                    .percentage(80)
+                    .reason("Capital garantizado con tasa regulada por BCRA")
                     .build(),
-                IAResponseDTO.AsignacionDTO.builder()
-                    .tipoActivo("Dólar / Cobertura")
-                    .porcentaje(20)
-                    .motivo("Cobertura mínima ante devaluación")
+                IAResponseDTO.AllocationDTO.builder()
+                    .assetType("Dólar / Cobertura")
+                    .percentage(20)
+                    .reason("Cobertura mínima ante devaluación")
                     .build()
             );
             case "Agresivo" -> List.of(
-                IAResponseDTO.AsignacionDTO.builder()
-                    .tipoActivo("Dólar / Cobertura")
-                    .porcentaje(60)
-                    .motivo("Mayor exposición cambiaria buscando ganancia por devaluación")
+                IAResponseDTO.AllocationDTO.builder()
+                    .assetType("Dólar / Cobertura")
+                    .percentage(60)
+                    .reason("Mayor exposición cambiaria buscando ganancia por devaluación")
                     .build(),
-                IAResponseDTO.AsignacionDTO.builder()
-                    .tipoActivo("Plazo Fijo Tradicional")
-                    .porcentaje(40)
-                    .motivo("Piso de rendimiento garantizado")
+                IAResponseDTO.AllocationDTO.builder()
+                    .assetType("Plazo Fijo Tradicional")
+                    .percentage(40)
+                    .reason("Piso de rendimiento garantizado")
                     .build()
             );
             default -> List.of( // Moderado
-                IAResponseDTO.AsignacionDTO.builder()
-                    .tipoActivo("Plazo Fijo Tradicional")
-                    .porcentaje(60)
-                    .motivo("Base de rendimiento estable con capital garantizado")
+                IAResponseDTO.AllocationDTO.builder()
+                    .assetType("Plazo Fijo Tradicional")
+                    .percentage(60)
+                    .reason("Base de rendimiento estable con capital garantizado")
                     .build(),
-                IAResponseDTO.AsignacionDTO.builder()
-                    .tipoActivo("Dólar / Cobertura")
-                    .porcentaje(40)
-                    .motivo("Cobertura moderada ante escenarios cambiarios")
+                IAResponseDTO.AllocationDTO.builder()
+                    .assetType("Dólar / Cobertura")
+                    .percentage(40)
+                    .reason("Cobertura moderada ante escenarios cambiarios")
                     .build()
             );
         };
@@ -404,90 +404,90 @@ public class IAService {
 
     // ─── Ganancia ponderada ─────────────────────────────────────
 
-    private double calcularGananciaPonderada(
-            List<RendimientoDTO> rendimientos,
-            List<IAResponseDTO.AsignacionDTO> distribucion
+    private double calculateWeightedGain(
+            List<PerformanceDTO> performances,
+            List<IAResponseDTO.AllocationDTO> allocation
     ) {
-        double gananciaTotal = 0;
+        double totalGain = 0;
 
-        for (IAResponseDTO.AsignacionDTO asignacion : distribucion) {
-            double pesoFraccion = asignacion.getPorcentaje() / 100.0;
+        for (IAResponseDTO.AllocationDTO alloc : allocation) {
+            double weightFraction = alloc.getPercentage() / 100.0;
 
             // Buscar el rendimiento que mejor matchea el tipo de activo
-            RendimientoDTO rendimiento = rendimientos.stream()
-                    .filter(r -> r.getTipo().toLowerCase().contains(
-                            extraerPalabraClave(asignacion.getTipoActivo())))
+            PerformanceDTO performance = performances.stream()
+                    .filter(r -> r.getType().toLowerCase().contains(
+                            extractKeyword(alloc.getAssetType())))
                     .findFirst()
-                    .orElse(rendimientos.stream()
-                            .max(Comparator.comparingDouble(RendimientoDTO::getTasaRealMensual))
+                    .orElse(performances.stream()
+                            .max(Comparator.comparingDouble(PerformanceDTO::getRealMonthlyRate))
                             .orElse(null));
 
-            if (rendimiento != null) {
-                gananciaTotal += rendimiento.getGananciaReal() * pesoFraccion;
+            if (performance != null) {
+                totalGain += performance.getRealGain() * weightFraction;
             }
         }
 
-        return gananciaTotal;
+        return totalGain;
     }
 
     // ─── Texto de recomendación rule-based (fallback) ───────────
 
-    private String generarTextoRecomendacion(
-            String perfil,
-            List<RendimientoDTO> rendimientos,
-            List<IAResponseDTO.AsignacionDTO> distribucion,
-            List<CriptoEstado> cripto,
-            List<PackCotizacion> packs,
-            List<DolarCotizacion> dolares,
-            double monto,
-            int plazoMeses,
-            double inflacionMensual,
-            String activoA,
-            String activoB
+    private String generateRuleBasedRecommendation(
+            String profile,
+            List<PerformanceDTO> performances,
+            List<IAResponseDTO.AllocationDTO> allocation,
+            List<CryptoState> crypto,
+            List<PackQuote> packs,
+            List<DollarQuote> dollars,
+            double amount,
+            int months,
+            double monthlyInflation,
+            String assetA,
+            String assetB
     ) {
         StringBuilder sb = new StringBuilder();
 
         // Intro personalizada por perfil
-        sb.append(switch (perfil) {
+        sb.append(switch (profile) {
             case "Conservador" -> "🛡️ Como inversor conservador, tu prioridad es proteger el capital. ";
             case "Agresivo" -> "🚀 Como inversor agresivo, buscás maximizar el rendimiento aceptando mayor volatilidad. ";
             default -> "⚖️ Como inversor moderado, buscás un balance entre seguridad y rendimiento. ";
         });
 
         // Contexto de inflación
-        sb.append(String.format("Con una inflación mensual del %.1f%%, ", inflacionMensual));
+        sb.append(String.format("Con una inflación mensual del %.1f%%, ", monthlyInflation));
 
         // Análisis de activos
-        long activosQueGanan = rendimientos.stream().filter(RendimientoDTO::isLeGanaALaInflacion).count();
-        if (rendimientos.isEmpty()) {
+        long beatingAssets = performances.stream().filter(PerformanceDTO::isBeatsInflation).count();
+        if (performances.isEmpty()) {
             sb.append("todavía no hay datos de mercado cargados. ");
-        } else if (activosQueGanan == rendimientos.size()) {
+        } else if (beatingAssets == performances.size()) {
             sb.append("todos los activos analizados le ganan a la inflación, lo cual es positivo. ");
-        } else if (activosQueGanan > 0) {
-            sb.append(String.format("solo %d de %d activos le ganan a la inflación. ", activosQueGanan, rendimientos.size()));
+        } else if (beatingAssets > 0) {
+            sb.append(String.format("solo %d de %d activos le ganan a la inflación. ", beatingAssets, performances.size()));
         } else {
             sb.append("ningún activo analizado supera la inflación — es momento de priorizar cobertura cambiaria. ");
         }
 
         // Comparación A vs B si se proporcionaron
-        if (activoA != null && activoB != null && !activoA.isBlank() && !activoB.isBlank()) {
-            sb.append(String.format("Comparando %s contra %s: ", activoA, activoB));
+        if (assetA != null && assetB != null && !assetA.isBlank() && !assetB.isBlank()) {
+            sb.append(String.format("Comparando %s contra %s: ", assetA, assetB));
             sb.append("según tu perfil, te recomendamos diversificar entre ambos siguiendo la distribución sugerida. ");
         }
 
         // Recomendación de distribución
         sb.append("Mi sugerencia de distribución: ");
-        for (IAResponseDTO.AsignacionDTO asig : distribucion) {
-            sb.append(String.format("%d%% en %s, ", asig.getPorcentaje(), asig.getTipoActivo()));
+        for (IAResponseDTO.AllocationDTO alloc : allocation) {
+            sb.append(String.format("%d%% en %s, ", alloc.getPercentage(), alloc.getAssetType()));
         }
 
         // Cripto según perfil
-        cripto.stream()
-                .filter(c -> c.getSimbolo().equals("BTCUSDT"))
+        crypto.stream()
+                .filter(c -> c.getSymbol().equals("BTCUSDT"))
                 .findFirst()
                 .ifPresent(btc -> sb.append(String.format(" Cripto: BTC en %s (%d/4 checks) — %s",
-                        btc.getVeredicto(), btc.getChecksPasados(),
-                        switch (perfil) {
+                        btc.getVerdict(), btc.getChecksPassed(),
+                        switch (profile) {
                             case "Conservador" -> "demasiado volátil para tu perfil, evitá. ";
                             case "Agresivo" -> "podés considerarla si el veredicto es BUY o WATCH. ";
                             default -> "solo como cobertura chica si el veredicto no es AVOID. ";
@@ -495,46 +495,46 @@ public class IAService {
 
         // Mercados: mencionar el pack que más rinde hoy (si hay datos)
         packs.stream()
-                .max(Comparator.comparingDouble(PackCotizacion::variacion24h))
-                .ifPresent(mejor -> sb.append(String.format(
+                .max(Comparator.comparingDouble(PackQuote::variation24h))
+                .ifPresent(best -> sb.append(String.format(
                         " En mercados, hoy el pack %s es el que más rinde (%+.2f%%, riesgo %s). ",
-                        mejor.nombre(), mejor.variacion24h(), mejor.riesgo())));
+                        best.name(), best.variation24h(), best.risk())));
 
         // Cierre
-        sb.append(String.format("para un plazo de %d meses con $%,.0f.", plazoMeses, monto));
+        sb.append(String.format("para un plazo de %d meses con $%,.0f.", months, amount));
 
         return sb.toString();
     }
 
     // ─── Resumen de estrategia ──────────────────────────────────
 
-    private String generarResumen(String perfil, String mejorOpcion, double inflacion) {
-        return switch (perfil) {
+    private String generateSummary(String profile, String bestOption, double inflacion) {
+        return switch (profile) {
             case "Conservador" -> String.format(
                 "Estrategia defensiva. Priorizar %s para capital garantizado. " +
-                "Inflación mensual: %.1f%%. Foco en preservar poder adquisitivo.", mejorOpcion, inflacion);
+                "Inflación mensual: %.1f%%. Foco en preservar poder adquisitivo.", bestOption, inflacion);
             case "Agresivo" -> String.format(
                 "Estrategia ofensiva. %s lidera en rendimiento real. " +
-                "Inflación mensual: %.1f%%. Foco en maximizar ganancia real con diversificación.", mejorOpcion, inflacion);
+                "Inflación mensual: %.1f%%. Foco en maximizar ganancia real con diversificación.", bestOption, inflacion);
             default -> String.format(
                 "Estrategia balanceada. %s ofrece el mejor rendimiento real. " +
-                "Inflación mensual: %.1f%%. Foco en equilibrar riesgo y retorno.", mejorOpcion, inflacion);
+                "Inflación mensual: %.1f%%. Foco en equilibrar riesgo y retorno.", bestOption, inflacion);
         };
     }
 
     // ─── Helpers ────────────────────────────────────────────────
 
-    private String normalizarPerfil(String perfil) {
-        if (perfil == null) return "Moderado";
-        return switch (perfil.toLowerCase().trim()) {
+    private String normalizeProfile(String profile) {
+        if (profile == null) return "Moderado";
+        return switch (profile.toLowerCase().trim()) {
             case "conservador" -> "Conservador";
             case "agresivo" -> "Agresivo";
             default -> "Moderado";
         };
     }
 
-    private String mapearNivelRiesgo(String perfil) {
-        return switch (perfil) {
+    private String mapRiskLevel(String profile) {
+        return switch (profile) {
             case "Conservador" -> "Bajo";
             case "Agresivo" -> "Alto";
             default -> "Medio";
@@ -542,15 +542,15 @@ public class IAService {
     }
 
     /** Palabra clave del tipo de activo para matchear contra los rendimientos. */
-    private String extraerPalabraClave(String tipoActivo) {
-        String lower = tipoActivo.toLowerCase();
+    private String extractKeyword(String assetType) {
+        String lower = assetType.toLowerCase();
         if (lower.contains("plazo")) return "plazo";
         if (lower.contains("billetera")) return "billetera";
         if (lower.contains("dólar") || lower.contains("dolar")) return "dólar";
         return "plazo"; // fallback conservador
     }
 
-    private double redondear(double valor) {
-        return Math.round(valor * 100.0) / 100.0;
+    private double round2(double value) {
+        return Math.round(value * 100.0) / 100.0;
     }
 }

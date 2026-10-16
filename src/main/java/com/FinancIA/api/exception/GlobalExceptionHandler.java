@@ -24,44 +24,44 @@ import java.time.LocalDateTime;
 public class GlobalExceptionHandler {
 
     @ExceptionHandler(ResourceNotFoundException.class)
-    public ResponseEntity<ErrorResponse> manejarNoEncontrado(
+    public ResponseEntity<ErrorResponse> handleNotFound(
             ResourceNotFoundException e, HttpServletRequest request) {
-        return construir(HttpStatus.NOT_FOUND, e.getMessage(), request);
+        return build(HttpStatus.NOT_FOUND, e.getMessage(), request);
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<ErrorResponse> manejarArgumentoInvalido(
+    public ResponseEntity<ErrorResponse> handleInvalidArgument(
             IllegalArgumentException e, HttpServletRequest request) {
-        return construir(HttpStatus.BAD_REQUEST, e.getMessage(), request);
+        return build(HttpStatus.BAD_REQUEST, e.getMessage(), request);
     }
 
     /** Errores de validación de DTOs (@Valid): 400 con el detalle de cada campo. */
     @ExceptionHandler(org.springframework.web.bind.MethodArgumentNotValidException.class)
-    public ResponseEntity<ErrorResponse> manejarValidacion(
+    public ResponseEntity<ErrorResponse> handleValidation(
             org.springframework.web.bind.MethodArgumentNotValidException e, HttpServletRequest request) {
-        String mensaje = e.getBindingResult().getFieldErrors().stream()
+        String message = e.getBindingResult().getFieldErrors().stream()
                 .map(f -> f.getField() + ": " + f.getDefaultMessage())
                 .collect(java.util.stream.Collectors.joining("; "));
-        return construir(HttpStatus.BAD_REQUEST, mensaje, request);
+        return build(HttpStatus.BAD_REQUEST, message, request);
     }
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<ErrorResponse> manejarErrorGenerico(
+    public ResponseEntity<ErrorResponse> handleGenericError(
             Exception e, HttpServletRequest request) {
         log.error("Error no controlado en {} {}", request.getMethod(), request.getRequestURI(), e);
-        return construir(HttpStatus.INTERNAL_SERVER_ERROR,
+        return build(HttpStatus.INTERNAL_SERVER_ERROR,
                 "Error interno del servidor", request);
     }
 
-    private ResponseEntity<ErrorResponse> construir(
-            HttpStatus status, String mensaje, HttpServletRequest request) {
-        ErrorResponse cuerpo = new ErrorResponse(
+    private ResponseEntity<ErrorResponse> build(
+            HttpStatus status, String message, HttpServletRequest request) {
+        ErrorResponse body = new ErrorResponse(
                 LocalDateTime.now(),
                 status.value(),
                 status.getReasonPhrase(),
-                mensaje,
+                message,
                 request.getRequestURI()
         );
-        return ResponseEntity.status(status).body(cuerpo);
+        return ResponseEntity.status(status).body(body);
     }
 }

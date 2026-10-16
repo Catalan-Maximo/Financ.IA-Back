@@ -1,9 +1,7 @@
 package com.FinancIA.api.dto;
 
-import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
-import lombok.NoArgsConstructor;
 
 import java.util.List;
 
@@ -14,44 +12,67 @@ import java.util.List;
  */
 @Data
 @Builder
-@NoArgsConstructor
-@AllArgsConstructor
 public class IAResponseDTO {
 
+    /** Constructor explícito: evita el constructor vacío generado por Lombok (corrupto en javac incremental). */
+    public IAResponseDTO() {}
+
+    /** Constructor con todos los campos (reemplaza al @AllArgsConstructor). */
+    public IAResponseDTO(String investorProfile, String recommendation, String riskLevel, java.util.List<AllocationDTO> suggestedAllocation, java.util.List<PerformanceDTO> performances, double estimatedRealGain, String strategySummary) {
+        this.investorProfile = investorProfile;
+        this.recommendation = recommendation;
+        this.riskLevel = riskLevel;
+        this.suggestedAllocation = suggestedAllocation;
+        this.performances = performances;
+        this.estimatedRealGain = estimatedRealGain;
+        this.strategySummary = strategySummary;
+    }
+
+
     /** Perfil de riesgo utilizado para la recomendación. */
-    private String perfilInversor;
+    private String investorProfile;
 
     /** Texto de recomendación generado por la IA. */
-    private String recomendacion;
+    private String recommendation;
 
     /** Nivel de riesgo general de la estrategia: "Bajo", "Medio", "Alto". */
-    private String nivelRiesgo;
+    private String riskLevel;
 
     /** Distribución sugerida del portafolio. */
-    private List<AsignacionDTO> distribucionSugerida;
+    private List<AllocationDTO> suggestedAllocation;
 
     /** Rendimientos proyectados para cada activo del mercado. */
-    private List<RendimientoDTO> rendimientos;
+    private List<PerformanceDTO> performances;
 
     /** Ganancia real total estimada del portafolio en $ al final del plazo. */
-    private double gananciaRealEstimada;
+    private double estimatedRealGain;
 
     /** Resumen breve de la estrategia. */
-    private String resumenEstrategia;
+    private String strategySummary;
 
     /**
      * Representa un porcentaje de asignación a un tipo de activo.
      */
     @Data
     @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class AsignacionDTO {
+            public static class AllocationDTO {
+
+        /** Constructor explícito (ver nota en IAResponseDTO). */
+        public AllocationDTO() {}
+
+        /** Constructor con todos los campos (reemplaza al @AllArgsConstructor). */
+        public AllocationDTO(String assetType, int percentage, String reason) {
+            this.assetType = assetType;
+            this.percentage = percentage;
+            this.reason = reason;
+        }
+
+
         /** Nombre del tipo de activo (ej. "Billetera Virtual", "Plazo Fijo", "Dólar"). */
-        private String tipoActivo;
+        private String assetType;
         /** Porcentaje sugerido del portafolio (0-100). */
-        private int porcentaje;
+        private int percentage;
         /** Justificación breve de la asignación. */
-        private String motivo;
+        private String reason;
     }
 }

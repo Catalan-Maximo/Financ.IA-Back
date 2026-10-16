@@ -19,7 +19,7 @@ import java.util.Date;
 public class JwtService {
 
     private final SecretKey key;
-    private final long expiracionMs;
+    private final long expirationMs;
 
     public JwtService(@Value("${jwt.secret:}") String secret,
                       @Value("${jwt.expiracion-horas:24}") long horas) {
@@ -28,16 +28,16 @@ public class JwtService {
                     "JWT_SECRET no configurada o muy corta: definir una clave de al menos 32 caracteres");
         }
         this.key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
-        this.expiracionMs = horas * 3_600_000L;
+        this.expirationMs = horas * 3_600_000L;
     }
 
     /** Genera un token firmado con el email como subject. */
-    public String generarToken(String email) {
+    public String generateToken(String email) {
         Date ahora = new Date();
         return Jwts.builder()
                 .subject(email)
                 .issuedAt(ahora)
-                .expiration(new Date(ahora.getTime() + expiracionMs))
+                .expiration(new Date(ahora.getTime() + expirationMs))
                 .signWith(key)
                 .compact();
     }
@@ -46,7 +46,7 @@ public class JwtService {
      * Extrae el email (subject) de un token.
      * @throws io.jsonwebtoken.JwtException si el token es inválido o expiró
      */
-    public String extraerEmail(String token) {
+    public String extractEmail(String token) {
         return Jwts.parser()
                 .verifyWith(key)
                 .build()

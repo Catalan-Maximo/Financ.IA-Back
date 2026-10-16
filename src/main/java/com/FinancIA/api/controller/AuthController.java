@@ -1,11 +1,11 @@
 package com.FinancIA.api.controller;
 
 import jakarta.validation.Valid;
-import com.FinancIA.api.domain.Usuario;
+import com.FinancIA.api.domain.User;
 import com.FinancIA.api.dto.AuthRequestDTO;
 import com.FinancIA.api.dto.AuthResponseDTO;
 import com.FinancIA.api.dto.RegisterRequestDTO;
-import com.FinancIA.api.repository.UsuarioRepository;
+import com.FinancIA.api.repository.UserRepository;
 import com.FinancIA.api.security.JwtService;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -23,52 +23,52 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/auth")
 public class AuthController {
 
-    private final UsuarioRepository usuarioRepository;
+    private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
 
-    public AuthController(UsuarioRepository usuarioRepository,
+    public AuthController(UserRepository userRepository,
                           PasswordEncoder passwordEncoder,
                           JwtService jwtService) {
-        this.usuarioRepository = usuarioRepository;
+        this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
     }
 
     @PostMapping("/register")
-    public AuthResponseDTO registrar(@RequestBody @Valid RegisterRequestDTO request) {
+    public AuthResponseDTO register(@RequestBody @Valid RegisterRequestDTO request) {
         // Normalizamos el email a minúsculas para evitar duplicados por case
-        String email = normalizarEmail(request.getEmail());
+        String email = normalizeEmail(request.getEmail());
 
-        if (usuarioRepository.findByEmailIgnoreCase(email).isPresent()) {
+        if (userRepository.findByEmailIgnoreCase(email).isPresent()) {
             throw new IllegalArgumentException("El email ya está registrado");
         }
 
-        Usuario usuario = new Usuario();
-        usuario.setNombre(request.getNombre());
-        usuario.setEmail(email);
-        usuario.setPassword(passwordEncoder.encode(request.getPassword()));
-        usuarioRepository.save(usuario);
+        User user = new User();
+        user.setName(request.getName());
+        user.setEmail(email);
+        user.setPassword(passwordEncoder.encode(request.getPassword()));
+        userRepository.save(user);
 
-        return new AuthResponseDTO(jwtService.generarToken(usuario.getEmail()),
-                usuario.getEmail(), usuario.getPerfilInversor());
+        return new AuthResponseDTO(jwtService.generateToken(user.getEmail()),
+                user.getEmail(), user.getInvestorProfile());
     }
 
     @PostMapping("/login")
     public AuthResponseDTO login(@RequestBody @Valid AuthRequestDTO request) {
-        Usuario usuario = usuarioRepository.findByEmailIgnoreCase(normalizarEmail(request.getEmail()))
+        User user = userRepository.findByEmailIgnoreCase(normalizeEmail(request.getEmail()))
                 .orElseThrow(() -> new IllegalArgumentException("Credenciales inválidas"));
 
-        if (!passwordEncoder.matches(request.getPassword(), usuario.getPassword())) {
+        if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
             throw new IllegalArgumentException("Credenciales inválidas");
         }
 
-        return new AuthResponseDTO(jwtService.generarToken(usuario.getEmail()),
-                usuario.getEmail(), usuario.getPerfilInversor());
+        return new AuthResponseDTO(jwtService.generateToken(user.getEmail()),
+                user.getEmail(), user.getInvestorProfile());
     }
 
     /** Trim + minúsculas: "Maxi@Mail.com" → "maxi@mail.com". */
-    private String normalizarEmail(String email) {
+    private String normalizeEmail(String email) {
         return email == null ? "" : email.trim().toLowerCase();
     }
 }

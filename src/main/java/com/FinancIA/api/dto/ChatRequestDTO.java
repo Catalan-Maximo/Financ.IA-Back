@@ -11,8 +11,11 @@ import java.util.List;
 @Data
 public class ChatRequestDTO {
 
-    private List<Mensaje> mensajes;
+    /** Constructor explícito: evita el constructor vacío generado por Lombok (corrupto en javac incremental). */
+    public ChatRequestDTO() {}
+
+    private List<Message> messages;
 
     /** Un mensaje de la conversación. */
-    public record Mensaje(String rol, String contenido) {}
+    public record Message(String rol, String contenido) {}
 }

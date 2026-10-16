@@ -6,9 +6,9 @@ package com.FinancIA.api.dto;
  * mensaje explicativo en criollo.
  */
 public record VersusResponseDTO(
-        RendimientoDTO activoA,
-        RendimientoDTO activoB,
-        String ganador,
-        Double probabilidadA,
-        String mensaje
+        PerformanceDTO assetA,
+        PerformanceDTO assetB,
+        String winner,
+        Double probabilityA,
+        String message
 ) {}
