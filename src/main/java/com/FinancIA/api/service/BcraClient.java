@@ -25,9 +25,9 @@ import java.util.Map;
 @Service
 public class BcraClient {
 
-    public static final int SERIE_BADLAR = 7;
-    public static final int SERIE_DOLAR_MINORISTA = 4;
-    public static final int SERIE_INFLACION_MENSUAL = 27;
+    public static final int SERIES_BADLAR = 7;
+    public static final int SERIES_RETAIL_DOLLAR = 4;
+    public static final int SERIES_MONTHLY_INFLATION = 27;
 
     private final RestClient restClient;
 
@@ -42,35 +42,35 @@ public class BcraClient {
     }
 
     /** Un valor de una serie con su fecha de publicación. */
-    public record SerieValor(LocalDate fecha, double valor) {}
+    public record SeriesValue(LocalDate date, double value) {}
 
     /**
      * Historial de una serie (para gráficos): [{fecha, valor}] de los
      * últimos `dias` registros, del más antiguo al más nuevo.
      */
     @SuppressWarnings("unchecked")
-    public List<Map<String, Object>> historial(int idVariable, int dias) {
+    public List<Map<String, Object>> history(int idVariable, int days) {
         Map<String, Object> body = restClient.get()
                 .uri(uriBuilder -> uriBuilder
                         .path("/estadisticas/v4.0/Monetarias/{id}")
-                        .queryParam("Limit", dias)
+                        .queryParam("Limit", days)
                         .build(idVariable))
                 .retrieve()
                 .body(new ParameterizedTypeReference<Map<String, Object>>() {});
 
         List<Map<String, Object>> results = (List<Map<String, Object>>) body.get("results");
-        List<Map<String, Object>> detalle = (List<Map<String, Object>>) results.get(0).get("detalle");
+        List<Map<String, Object>> detail = (List<Map<String, Object>>) results.get(0).get("detalle");
 
         // La API devuelve del más nuevo al más viejo: invertimos para el gráfico
-        List<Map<String, Object>> puntos = new ArrayList<>();
-        for (int i = detalle.size() - 1; i >= 0; i--) {
-            Map<String, Object> d = detalle.get(i);
-            puntos.add(Map.of(
-                    "fecha", (String) d.get("fecha"),
-                    "valor", ((Number) d.get("valor")).doubleValue()
+        List<Map<String, Object>> points = new ArrayList<>();
+        for (int i = detail.size() - 1; i >= 0; i--) {
+            Map<String, Object> d = detail.get(i);
+            points.add(Map.of(
+                    "date", (String) d.get("fecha"),
+                    "value", ((Number) d.get("valor")).doubleValue()
             ));
         }
-        return puntos;
+        return points;
     }
 
     /**
@@ -80,7 +80,7 @@ public class BcraClient {
      * {"results":[{"idVariable":7,"detalle":[{"fecha":"2026-08-14","valor":23.31}]}]}
      */
     @SuppressWarnings("unchecked")
-    public SerieValor ultimoValor(int idVariable) {
+    public SeriesValue latestValue(int idVariable) {
         Map<String, Object> body = restClient.get()
                 .uri(uriBuilder -> uriBuilder
                         .path("/estadisticas/v4.0/Monetarias/{id}")
@@ -90,12 +90,12 @@ public class BcraClient {
                 .body(new ParameterizedTypeReference<Map<String, Object>>() {});
 
         List<Map<String, Object>> results = (List<Map<String, Object>>) body.get("results");
-        List<Map<String, Object>> detalle = (List<Map<String, Object>>) results.get(0).get("detalle");
-        Map<String, Object> ultimo = detalle.get(0);
+        List<Map<String, Object>> detail = (List<Map<String, Object>>) results.get(0).get("detalle");
+        Map<String, Object> latest = detail.get(0);
 
-        return new SerieValor(
-                LocalDate.parse((String) ultimo.get("fecha")),
-                ((Number) ultimo.get("valor")).doubleValue()
+        return new SeriesValue(
+                LocalDate.parse((String) latest.get("fecha")),
+                ((Number) latest.get("valor")).doubleValue()
         );
     }
 }

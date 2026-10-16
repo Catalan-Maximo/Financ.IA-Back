@@ -1,6 +1,6 @@
 package com.FinancIA.api.service;
 
-import com.FinancIA.api.dto.AccionCotizacion;
+import com.FinancIA.api.dto.StockQuote;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
@@ -42,7 +42,7 @@ public class YahooFinanceClient {
      * Los valores null (días sin cotización) se filtran.
      */
     @SuppressWarnings("unchecked")
-    public List<Double> velas3m(String ticker) {
+    public List<Double> candles3m(String ticker) {
         Map<String, Object> body = restClient.get()
                 .uri(uriBuilder -> uriBuilder
                         .path("/v8/finance/chart/{ticker}")
@@ -53,11 +53,11 @@ public class YahooFinanceClient {
                 .body(Map.class);
 
         Map<String, Object> chart = (Map<String, Object>) body.get("chart");
-        Map<String, Object> resultado = (Map<String, Object>) ((java.util.List<Object>) chart.get("result"))
+        Map<String, Object> result = (Map<String, Object>) ((java.util.List<Object>) chart.get("result"))
                 .stream().findFirst()
                 .orElseThrow(() -> new IllegalStateException("Sin datos para " + ticker));
 
-        Map<String, Object> indicators = (Map<String, Object>) resultado.get("indicators");
+        Map<String, Object> indicators = (Map<String, Object>) result.get("indicators");
         Map<String, Object> quote = (Map<String, Object>) ((java.util.List<Object>) indicators.get("quote"))
                 .stream().findFirst().orElse(Map.of());
         List<Object> closes = (List<Object>) quote.get("close");
@@ -73,7 +73,7 @@ public class YahooFinanceClient {
      * Si Yahoo no trae el cierre anterior, la variación queda en 0.
      */
     @SuppressWarnings("unchecked")
-    public AccionCotizacion cotizacion(String ticker) {
+    public StockQuote quote(String ticker) {
         Map<String, Object> body = restClient.get()
                 .uri(uriBuilder -> uriBuilder
                         .path("/v8/finance/chart/{ticker}")
@@ -89,15 +89,15 @@ public class YahooFinanceClient {
                 .map(r -> (Map<String, Object>) ((Map<String, Object>) r).get("meta"))
                 .orElseThrow(() -> new IllegalStateException("Sin datos para " + ticker));
 
-        double precio = ((Number) meta.get("regularMarketPrice")).doubleValue();
-        Object cierreAnterior = meta.get("chartPreviousClose");
-        if (cierreAnterior == null) cierreAnterior = meta.get("previousClose");
+        double price = ((Number) meta.get("regularMarketPrice")).doubleValue();
+        Object previousClose = meta.get("chartPreviousClose");
+        if (previousClose == null) previousClose = meta.get("previousClose");
 
-        double variacion = 0;
-        if (cierreAnterior != null && ((Number) cierreAnterior).doubleValue() > 0) {
-            variacion = (precio / ((Number) cierreAnterior).doubleValue() - 1) * 100;
+        double variation = 0;
+        if (previousClose != null && ((Number) previousClose).doubleValue() > 0) {
+            variation = (price / ((Number) previousClose).doubleValue() - 1) * 100;
         }
-        return new AccionCotizacion(ticker, redondear(precio), redondear(variacion), "n/d");
+        return new StockQuote(ticker, round2(price), round2(variation), "n/d");
     }
 
     // ─── Fundamantales (crumb flow) ─────────────────────────────
@@ -107,7 +107,7 @@ public class YahooFinanceClient {
     private String crumb;
 
     /** Obtiene (y cachea) el crumb: cookie de fc.yahoo.com → getcrumb. */
-    private synchronized void asegurarCrumb() {
+    private synchronized void ensureCrumb() {
         if (crumb != null) return;
 
         // 1. Cookie de sesión (fc.yahoo.com la setea)
@@ -135,10 +135,10 @@ public class YahooFinanceClient {
      * invalida la sesión.
      */
     @SuppressWarnings("unchecked")
-    public Map<String, Object> fundamentalesRaw(String ticker) {
-        for (int intento = 0; intento < 2; intento++) {
+    public Map<String, Object> rawFundamentals(String ticker) {
+        for (int attempt = 0; attempt < 2; attempt++) {
             try {
-                asegurarCrumb();
+                ensureCrumb();
                 Map<String, Object> body = restClient.get()
                         .uri(uriBuilder -> uriBuilder
                                 .path("/v10/finance/quoteSummary/{ticker}")
@@ -160,7 +160,7 @@ public class YahooFinanceClient {
                 return result;
             } catch (Exception e) {
                 crumb = null; // sesión invalidada: regenerar y reintentar
-                if (intento == 1) throw e;
+                if (attempt == 1) throw e;
             }
         }
         throw new IllegalStateException("No se pudo consultar Yahoo para " + ticker);
@@ -171,9 +171,9 @@ public class YahooFinanceClient {
      * Consulta varias palabras clave y deduplica por título.
      */
     @SuppressWarnings("unchecked")
-    public List<Map<String, Object>> noticias(int cantidad) {
-        List<Map<String, Object>> todas = new java.util.ArrayList<>();
-        java.util.Set<String> vistos = new java.util.HashSet<>();
+    public List<Map<String, Object>> news(int quantity) {
+        List<Map<String, Object>> all = new java.util.ArrayList<>();
+        java.util.Set<String> seen = new java.util.HashSet<>();
 
         for (String query : List.of("markets", "inflation", "stocks")) {
             try {
@@ -181,7 +181,7 @@ public class YahooFinanceClient {
                         .uri(uriBuilder -> uriBuilder
                                 .path("/v1/finance/search")
                                 .queryParam("q", query)
-                                .queryParam("newsCount", Math.max(cantidad, 5))
+                                .queryParam("newsCount", Math.max(quantity, 5))
                                 .build())
                         .retrieve()
                         .body(Map.class);
@@ -190,12 +190,12 @@ public class YahooFinanceClient {
                 if (news == null) continue;
 
                 for (Map<String, Object> n : news) {
-                    String titulo = (String) n.get("title");
-                    if (titulo == null || !vistos.add(titulo)) continue;
+                    String title = (String) n.get("title");
+                    if (title == null || !seen.add(title)) continue;
                     String link = (String) n.get("link");
-                    todas.add(Map.of(
-                            "titulo", titulo,
-                            "medio", n.get("publisher") != null ? n.get("publisher") : "",
+                    all.add(Map.of(
+                            "title", title,
+                            "outlet", n.get("publisher") != null ? n.get("publisher") : "",
                             "link", link != null ? link : ""
                     ));
                 }
@@ -203,12 +203,12 @@ public class YahooFinanceClient {
                 // Una query fallida no rompe el resto
             }
         }
-        return todas.stream().limit(cantidad).toList();
+        return all.stream().limit(quantity).toList();
     }
 
     /** Cierres diarios con fecha (para gráficos de acciones). */
     @SuppressWarnings("unchecked")
-    public List<Map<String, Object>> velasConFecha(String ticker, int dias) {
+    public List<Map<String, Object>> candlesWithDate(String ticker, int days) {
         Map<String, Object> body = restClient.get()
                 .uri(uriBuilder -> uriBuilder
                         .path("/v8/finance/chart/{ticker}")
@@ -219,29 +219,29 @@ public class YahooFinanceClient {
                 .body(Map.class);
 
         Map<String, Object> chart = (Map<String, Object>) body.get("chart");
-        Map<String, Object> resultado = (Map<String, Object>) ((List<Object>) chart.get("result"))
+        Map<String, Object> result = (Map<String, Object>) ((List<Object>) chart.get("result"))
                 .stream().findFirst()
                 .orElseThrow(() -> new IllegalStateException("Sin datos para " + ticker));
 
-        List<Object> timestamps = (List<Object>) resultado.get("timestamp");
+        List<Object> timestamps = (List<Object>) result.get("timestamp");
         Map<String, Object> quote = (Map<String, Object>) ((List<Object>)
-                ((Map<String, Object>) resultado.get("indicators")).get("quote"))
+                ((Map<String, Object>) result.get("indicators")).get("quote"))
                 .stream().findFirst().orElse(Map.of());
         List<Object> closes = (List<Object>) quote.get("close");
 
-        List<Map<String, Object>> puntos = new java.util.ArrayList<>();
+        List<Map<String, Object>> points = new java.util.ArrayList<>();
         for (int i = 0; i < timestamps.size() && i < closes.size(); i++) {
             if (closes.get(i) == null) continue;
             long epoch = ((Number) timestamps.get(i)).longValue();
-            String fecha = java.time.Instant.ofEpochSecond(epoch)
+            String date = java.time.Instant.ofEpochSecond(epoch)
                     .atZone(java.time.ZoneId.of("UTC")).toLocalDate().toString();
-            puntos.add(Map.of("fecha", fecha,
-                    "valor", ((Number) closes.get(i)).doubleValue()));
+            points.add(Map.of("date", date,
+                    "value", ((Number) closes.get(i)).doubleValue()));
         }
-        return puntos;
+        return points;
     }
 
-    private double redondear(double valor) {
-        return Math.round(valor * 100.0) / 100.0;
+    private double round2(double value) {
+        return Math.round(value * 100.0) / 100.0;
     }
 }

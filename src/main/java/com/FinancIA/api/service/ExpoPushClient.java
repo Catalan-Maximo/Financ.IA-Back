@@ -28,16 +28,16 @@ public class ExpoPushClient {
     }
 
     /** Envía una notificación a un dispositivo. */
-    public void enviar(String token, String titulo, String cuerpo) {
-        Map<String, Object> body = Map.of(
+    public void send(String token, String title, String body) {
+        Map<String, Object> payload = Map.of(
                 "to", token,
-                "title", titulo,
-                "body", cuerpo
+                "title", title,
+                "body", body
         );
         restClient.post()
                 .uri("/--/api/v2/push/send")
                 .contentType(MediaType.APPLICATION_JSON)
-                .body(body)
+                .body(payload)
                 .retrieve()
                 .toBodilessEntity();
     }

@@ -19,10 +19,10 @@ import java.util.List;
 @Service
 public class BinanceClient {
 
-    public static final List<String> PARES = List.of("BTCUSDT", "ETHUSDT");
+    public static final List<String> PAIRS = List.of("BTCUSDT", "ETHUSDT");
 
     /** Criptos extra: solo informativas (precio/gráfico), sin análisis ni recomendaciones. */
-    public static final List<String> OTRAS_CRIPTOS =
+    public static final List<String> OTHER_CRYPTOS =
             List.of("SOLUSDT", "ADAUSDT", "XRPUSDT", "DOGEUSDT", "BNBUSDT", "LTCUSDT");
 
     private final RestClient restClient;
@@ -44,11 +44,11 @@ public class BinanceClient {
      * Trae las últimas velas diarias de un par.
      * @param limit cantidad de velas (210 alcanza para SMA200 + RSI14)
      */
-    public List<Candle> velasDiarias(String simbolo, int limit) {
+    public List<Candle> dailyCandles(String symbol, int limit) {
         List<List<Object>> raw = restClient.get()
                 .uri(uriBuilder -> uriBuilder
                         .path("/api/v3/klines")
-                        .queryParam("symbol", simbolo)
+                        .queryParam("symbol", symbol)
                         .queryParam("interval", "1d")
                         .queryParam("limit", limit)
                         .build())

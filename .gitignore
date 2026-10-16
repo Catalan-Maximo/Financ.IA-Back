@@ -18,3 +18,6 @@
 *.iml
 .vscode/
 .DS_Store
+# credenciales locales (no subir)
+.env
+.env.properties

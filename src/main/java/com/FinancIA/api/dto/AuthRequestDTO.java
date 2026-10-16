@@ -7,6 +7,9 @@ import lombok.Data;
 @Data
 public class AuthRequestDTO {
 
+    /** Constructor explícito: evita el constructor vacío generado por Lombok (corrupto en javac incremental). */
+    public AuthRequestDTO() {}
+
     @NotBlank
     private String email;
     @NotBlank

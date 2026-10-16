@@ -1,0 +1,18 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: financia-db
+    # puerto 5433 para no chocar con un Postgres local instalado
+    # (bind 127.0.0.1: solo accesible desde esta computadora)
+    ports:
+      - "127.0.0.1:5433:5432"
+    environment:
+      POSTGRES_USER: financia
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: financia
+    volumes:
+      # los datos sobreviven al apagar/prender el contenedor
+      - financia-db-data:/var/lib/postgresql/data
+
+volumes:
+  financia-db-data:

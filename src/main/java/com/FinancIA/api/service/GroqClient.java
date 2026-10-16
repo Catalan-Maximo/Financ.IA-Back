@@ -47,7 +47,7 @@ public class GroqClient {
     }
 
     /** true si hay API key configurada (si no, IAService usa fallback). */
-    public boolean estaConfigurado() {
+    public boolean isConfigured() {
         return apiKey != null && !apiKey.isBlank();
     }
 
@@ -59,45 +59,45 @@ public class GroqClient {
      *                     distribución, perfil, monto, plazo, inflación)
      * @return el texto generado por el modelo
      */
-    public String generarRecomendacion(String systemPrompt, String userPrompt) {
-        return enviar(systemPrompt, List.of(Map.of("rol", "user", "contenido", userPrompt)));
+    public String generateRecommendation(String systemPrompt, String userPrompt) {
+        return send(systemPrompt, List.of(Map.of("role", "user", "content", userPrompt)));
     }
 
     /**
      * Chat libre: recibe la historia completa de mensajes
      * ([{rol: user|assistant, contenido}]) y devuelve la respuesta.
      */
-    public String chat(String systemPrompt, List<Map<String, String>> mensajes) {
-        return enviar(systemPrompt, mensajes);
+    public String chat(String systemPrompt, List<Map<String, String>> messages) {
+        return send(systemPrompt, messages);
     }
 
     @SuppressWarnings("unchecked")
-    private String enviar(String systemPrompt, List<Map<String, String>> mensajes) {
+    private String send(String systemPrompt, List<Map<String, String>> messages) {
         // La API de Groq espera las claves en inglés ("role" / "content");
         // internamente usamos "rol" / "contenido" y convertimos acá.
-        List<Map<String, String>> historial = new java.util.ArrayList<>();
-        historial.add(Map.of("role", "system", "content", systemPrompt));
-        for (Map<String, String> m : mensajes) {
-            historial.add(Map.of("role", m.get("rol"), "content", m.get("contenido")));
+        List<Map<String, String>> history = new java.util.ArrayList<>();
+        history.add(Map.of("role", "system", "content", systemPrompt));
+        for (Map<String, String> m : messages) {
+            history.add(Map.of("role", m.get("role"), "content", m.get("content")));
         }
 
         Map<String, Object> body = Map.of(
                 "model", model,
-                "messages", historial,
+                "messages", history,
                 "temperature", 0.7,
                 "max_tokens", 600
         );
 
-        Map<String, Object> respuesta = restClient.post()
+        Map<String, Object> answer = restClient.post()
                 .uri("/chat/completions")
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(body)
                 .retrieve()
                 .body(new ParameterizedTypeReference<Map<String, Object>>() {});
 
-        List<Map<String, Object>> choices = (List<Map<String, Object>>) respuesta.get("choices");
+        List<Map<String, Object>> choices = (List<Map<String, Object>>) answer.get("choices");
         Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
-        return limpiarMarkdown((String) message.get("content"));
+        return cleanMarkdown((String) message.get("content"));
     }
 
     /**
@@ -105,9 +105,9 @@ public class GroqClient {
      * La app lo muestra como texto plano, así que lo limpiamos acá
      * para que nunca se vean los asteriscos.
      */
-    private String limpiarMarkdown(String texto) {
-        if (texto == null) return "";
-        return texto
+    private String cleanMarkdown(String text) {
+        if (text == null) return "";
+        return text
                 .replaceAll("\\*\\*", "")
                 .replaceAll("\\*", "")
                 .replaceAll("`", "")
