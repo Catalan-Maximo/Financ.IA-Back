@@ -17,5 +17,5 @@ public class ChatRequestDTO {
     private List<Message> messages;
 
     /** Un mensaje de la conversación. */
-    public record Message(String rol, String contenido) {}
+    public record Message(String role, String content) {}
 }

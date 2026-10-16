@@ -53,12 +53,6 @@ public class UserController {
         return userRepository.save(user);
     }
 
-    @GetMapping("/{id}")
-    public User getUser(@PathVariable Long id) {
-        return userRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Usuario no encontrado"));
-    }
-
     /**
      * POST /api/v1/usuarios/push-token
      *
