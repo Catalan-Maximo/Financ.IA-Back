@@ -523,13 +523,13 @@ public class IAService {
         return switch (profile) {
             case "Conservador" -> String.format(
                 "Estrategia defensiva. Priorizar %s para capital garantizado. " +
-                "Inflación mensual: %.1f%%. Foco en preservar poder adquisitivo.", bestOption, inflacion);
+                "Inflación mensual: %.1f%%. Foco en preservar poder adquisitivo.", bestOption, inflation);
             case "Agresivo" -> String.format(
                 "Estrategia ofensiva. %s lidera en rendimiento real. " +
-                "Inflación mensual: %.1f%%. Foco en maximizar ganancia real con diversificación.", bestOption, inflacion);
+                "Inflación mensual: %.1f%%. Foco en maximizar ganancia real con diversificación.", bestOption, inflation);
             default -> String.format(
                 "Estrategia balanceada. %s ofrece el mejor rendimiento real. " +
-                "Inflación mensual: %.1f%%. Foco en equilibrar riesgo y retorno.", bestOption, inflacion);
+                "Inflación mensual: %.1f%%. Foco en equilibrar riesgo y retorno.", bestOption, inflation);
         };
     }
 
