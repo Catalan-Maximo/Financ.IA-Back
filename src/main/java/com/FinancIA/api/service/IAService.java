@@ -1,17 +1,28 @@
 package com.FinancIA.api.service;
 
-import com.FinancIA.api.domain.CryptoState;
-import com.FinancIA.api.dto.*;
-import com.FinancIA.api.repository.CryptoStateRepository;
-import com.FinancIA.api.repository.MarketRateRepository;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Service;
-
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+
+import com.FinancIA.api.domain.CryptoState;
+import com.FinancIA.api.dto.ChatRequestDTO;
+import com.FinancIA.api.dto.ChatResponseDTO;
+import com.FinancIA.api.dto.ComparisonRequest;
+import com.FinancIA.api.dto.ComparisonResponse;
+import com.FinancIA.api.dto.DollarQuote;
+import com.FinancIA.api.dto.ExplainRequestDTO;
+import com.FinancIA.api.dto.IARequestDTO;
+import com.FinancIA.api.dto.IAResponseDTO;
+import com.FinancIA.api.dto.PackQuote;
+import com.FinancIA.api.dto.PerformanceDTO;
+import com.FinancIA.api.repository.CryptoStateRepository;
+import com.FinancIA.api.repository.MarketRateRepository;
 
 /**
  * Servicio de "IA" que genera recomendaciones personalizadas de inversión
@@ -30,8 +41,9 @@ import java.util.Optional;
  * ─────────────────────────────────────────────────────────
  */
 @Service
-@Slf4j
 public class IAService {
+
+    private static final Logger log = LoggerFactory.getLogger(IAService.class);
 
     /** Prompt del chatbot de dudas: responde con los datos vivos de la app. */
     private static final String CHAT_SYSTEM_PROMPT = """
@@ -239,7 +251,7 @@ public class IAService {
         }
 
         // 4. Texto de recomendación: Groq si está disponible, si no rule-based
-        String recommendation = generarRecomendacionConFallback(
+        String recommendation = generateRecommendationWithFallback(
                 profile, performances, allocation, crypto, packs, dollars,
                 amount, months, monthlyInflation,
                 request.getAssetA(), request.getAssetB()
@@ -261,7 +273,7 @@ public class IAService {
 
     // ─── Recomendación: Groq con fallback ──────────────────────
 
-    private String generarRecomendacionConFallback(
+    private String generateRecommendationWithFallback(
             String profile,
             List<PerformanceDTO> performances,
             List<IAResponseDTO.AllocationDTO> allocation,
@@ -275,7 +287,7 @@ public class IAService {
             String assetB
     ) {
         String fallback = generateRuleBasedRecommendation(
-                profile, performances, allocation, crypto, packs, dollars,
+                profile, performances, allocation, crypto, packs,
                 amount, months, monthlyInflation,
                 assetA, assetB
         );
@@ -438,7 +450,6 @@ public class IAService {
             List<IAResponseDTO.AllocationDTO> allocation,
             List<CryptoState> crypto,
             List<PackQuote> packs,
-            List<DollarQuote> dollars,
             double amount,
             int months,
             double monthlyInflation,
@@ -508,7 +519,7 @@ public class IAService {
 
     // ─── Resumen de estrategia ──────────────────────────────────
 
-    private String generateSummary(String profile, String bestOption, double inflacion) {
+    private String generateSummary(String profile, String bestOption, double inflation) {
         return switch (profile) {
             case "Conservador" -> String.format(
                 "Estrategia defensiva. Priorizar %s para capital garantizado. " +
