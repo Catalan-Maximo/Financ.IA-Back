@@ -131,7 +131,7 @@ public class IAService {
         try {
             List<Map<String, String>> messages = new ArrayList<>();
             for (ChatRequestDTO.Message m : request.getMessages()) {
-                messages.add(Map.of("role", m.rol(), "content", m.contenido()));
+                messages.add(Map.of("role", m.role(), "content", m.content()));
             }
 
             String answer = groqClient.chat(CHAT_SYSTEM_PROMPT + "\n\n" + buildChatContext(), messages);

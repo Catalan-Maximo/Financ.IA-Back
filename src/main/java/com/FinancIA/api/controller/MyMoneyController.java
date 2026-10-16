@@ -8,6 +8,7 @@ import com.FinancIA.api.repository.ExpenseRepository;
 import com.FinancIA.api.repository.SavingsGoalRepository;
 import com.FinancIA.api.repository.PositionRepository;
 import com.FinancIA.api.repository.UserRepository;
+import com.FinancIA.api.exception.ResourceNotFoundException;
 import com.FinancIA.api.service.MarketService;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
@@ -19,15 +20,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Portafolio y metas del usuario autenticado.
- *
- * GET    /api/v1/midinero/posiciones       — posiciones con P&L real
- * POST   /api/v1/midinero/posiciones       — agregar posición
- * DELETE /api/v1/midinero/posiciones/{id}  — eliminar posición
- * GET    /api/v1/midinero/metas            — metas de ahorro
- * POST   /api/v1/midinero/metas            — crear meta
- * POST   /api/v1/midinero/metas/{id}/aporte — sumar un aporte
- * DELETE /api/v1/midinero/metas/{id}       — eliminar meta
+ * Portfolio and savings goals of the authenticated user.
+ * Every mutation verifies ownership (email from the JWT) before touching data.
  */
 @RestController
 @RequestMapping("/api/v1/my-money")
@@ -65,17 +59,22 @@ public class MyMoneyController {
     }
 
     @PostMapping("/positions")
-    public Map<String, Object> addPosition(@RequestBody Position posicion) {
-        posicion.setId(null);
-        posicion.setEmail(email());
-        if (posicion.getDate() == null) posicion.setDate(LocalDate.now());
-        positionRepository.save(posicion);
-        return withPnl(posicion);
+    public Map<String, Object> addPosition(@RequestBody Position position) {
+        position.setId(null);
+        position.setEmail(email());
+        if (position.getDate() == null) position.setDate(LocalDate.now());
+        positionRepository.save(position);
+        return withPnl(position);
     }
 
-    @DeleteMapping("/posiciones/{id}")
+    @DeleteMapping("/positions/{id}")
     public Map<String, String> deletePosition(@PathVariable Long id) {
-        positionRepository.deleteById(id);
+        Position position = positionRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Position not found"));
+        if (!email().equalsIgnoreCase(position.getEmail())) {
+            throw new ResourceNotFoundException("Position not found");
+        }
+        positionRepository.delete(position);
         return Map.of("status", "ok");
     }
 
@@ -113,24 +112,32 @@ public class MyMoneyController {
     }
 
     @PostMapping("/goals")
-    public SavingsGoal createGoal(@RequestBody SavingsGoal meta) {
-        meta.setId(null);
-        meta.setEmail(email());
-        if (meta.getCurrentAmount() == 0) meta.setCurrentAmount(0);
-        return goalRepository.save(meta);
+    public SavingsGoal createGoal(@RequestBody SavingsGoal goal) {
+        goal.setId(null);
+        goal.setEmail(email());
+        if (goal.getCurrentAmount() == 0) goal.setCurrentAmount(0);
+        return goalRepository.save(goal);
     }
 
     @PostMapping("/goals/{id}/contribution")
     public SavingsGoal contribute(@PathVariable Long id, @RequestBody Map<String, Double> body) {
-        SavingsGoal meta = goalRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Meta no encontrada"));
-        meta.setCurrentAmount(meta.getCurrentAmount() + body.getOrDefault("amount", 0.0));
-        return goalRepository.save(meta);
+        SavingsGoal goal = goalRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Goal not found"));
+        if (!email().equalsIgnoreCase(goal.getEmail())) {
+            throw new ResourceNotFoundException("Goal not found");
+        }
+        goal.setCurrentAmount(goal.getCurrentAmount() + body.getOrDefault("amount", 0.0));
+        return goalRepository.save(goal);
     }
 
-    @DeleteMapping("/metas/{id}")
+    @DeleteMapping("/goals/{id}")
     public Map<String, String> deleteGoal(@PathVariable Long id) {
-        goalRepository.deleteById(id);
+        SavingsGoal goal = goalRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Goal not found"));
+        if (!email().equalsIgnoreCase(goal.getEmail())) {
+            throw new ResourceNotFoundException("Goal not found");
+        }
+        goalRepository.delete(goal);
         return Map.of("status", "ok");
     }
 
@@ -150,9 +157,14 @@ public class MyMoneyController {
         return expenseRepository.save(expense);
     }
 
-    @DeleteMapping("/gastos/{id}")
+    @DeleteMapping("/expenses/{id}")
     public Map<String, String> deleteExpense(@PathVariable Long id) {
-        expenseRepository.deleteById(id);
+        Expense expense = expenseRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Expense not found"));
+        if (!email().equalsIgnoreCase(expense.getEmail())) {
+            throw new ResourceNotFoundException("Expense not found");
+        }
+        expenseRepository.delete(expense);
         return Map.of("status", "ok");
     }
 
